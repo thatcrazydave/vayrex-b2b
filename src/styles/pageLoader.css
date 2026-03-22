@@ -1,0 +1,50 @@
+/* ================================================
+   Page Loader — Refined Bars
+   ================================================ */
+
+.page-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.page-loader-bars {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 42px;
+}
+
+.page-loader-bar {
+  width: 5px;
+  height: 42px;
+  background: var(--primary-color);
+  border-radius: var(--radius-full);
+  animation: pageBarPulse 1.2s ease-in-out infinite;
+}
+
+.page-loader-text {
+  color: var(--text-light);
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+@keyframes pageBarPulse {
+
+  0%,
+  100% {
+    transform: scaleY(0.35);
+    opacity: 0.25;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}

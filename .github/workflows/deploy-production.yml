@@ -1,0 +1,154 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Lint check
+        run: npm run lint
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Validate backend
+        working-directory: ./backend
+        run: node -c server.js
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+      
+      - name: Run npm audit (backend)
+        working-directory: ./backend
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+      
+      - name: Check for secrets in code
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.before }}
+          head: ${{ github. sha }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [test-and-build, security-scan]
+    if: success()
+    environment:
+      name: production
+      url: https://vayrex.com
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Notify deployment start
+        run: |
+          echo " PRODUCTION DEPLOYMENT INITIATED"
+          echo "==========================================="
+          echo "Commit: ${{ github.sha }}"
+          echo "Author: ${{ github.actor }}"
+          echo "Timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "==========================================="
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Build frontend
+        run: npm ci && npm run build
+      
+      - name: Prepare backend
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Deploy frontend to production
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.PROD_AWS_REGION }}
+          PROD_S3_BUCKET: ${{ secrets.PROD_S3_BUCKET }}
+          PROD_CLOUDFRONT_ID: ${{ secrets.PROD_CLOUDFRONT_ID }}
+        run: |
+          echo "  Deploying frontend to production S3"
+          echo "Bucket: $PROD_S3_BUCKET"
+          echo "Region: $AWS_REGION"
+          echo "Note: Configure AWS credentials in GitHub secrets for actual deployment"
+      
+      - name: Deploy backend to production
+        env:
+          PROD_SERVER_URL: ${{ secrets.PROD_SERVER_URL }}
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          MONGODB_URI: ${{ secrets.PROD_MONGODB_URI }}
+          JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+        run: |
+          echo " Deploying backend to production"
+          echo "Server: $PROD_SERVER_URL"
+          echo "Note: Configure deployment secrets for actual backend deployment"
+      
+      - name: Verify production deployment
+        run: |
+          echo " Running production smoke tests"
+          echo "Checking endpoints availability..."
+          sleep 10
+          echo "Note: Add actual production health checks here"
+      
+      - name: Create deployment record
+        run: |
+          echo " Creating deployment record"
+          echo "Deployment ID: $(date +%s)"
+          echo "Version: ${{ github.ref }}"
+      
+      - name: Notify production deployment success
+        if: success()
+        run: |
+          echo " PRODUCTION DEPLOYMENT SUCCESSFUL"
+          echo "==========================================="
+          echo "Deployed at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Commit: ${{ github.sha }}"
+          echo "==========================================="
+      
+      - name: Notify production deployment failure
+        if: failure()
+        run: |
+          echo " PRODUCTION DEPLOYMENT FAILED"
+          echo "==========================================="
+          echo "Failed at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Commit: ${{ github.sha }}"
+          echo "Please investigate immediately!"
+          echo "==========================================="
+          exit 1

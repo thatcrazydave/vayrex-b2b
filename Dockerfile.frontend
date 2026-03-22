@@ -1,0 +1,41 @@
+# Frontend Dockerfile - Build stage
+FROM node:20-alpine as builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Verify lockfile presence (fail fast for CI)
+RUN ls -la && test -f package-lock.json && echo "package-lock.json present" && head -n 20 package-lock.json
+
+# Install dependencies
+RUN npm install --production=false
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy built app from builder
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Create .env.example for runtime
+RUN echo "VITE_API_URL=http://localhost:5001/api" > /usr/share/nginx/html/.env.example
+
+# Expose port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost/health || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

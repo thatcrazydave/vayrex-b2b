@@ -1,0 +1,27 @@
+gversion: '3.8'
+
+services:
+  # ===== REDIS ONLY =====
+  redis:
+    image: redis:7-alpine
+    container_name: veyrax-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "AUTH", "your_secure_password_here", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  veyrax-network:
+    driver: bridge

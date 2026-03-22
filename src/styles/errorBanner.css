@@ -1,0 +1,134 @@
+/* ================================================
+   Error Banner — Refined
+   ================================================ */
+
+.error-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1rem 1.15rem;
+  margin: 1rem 0;
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+  background: var(--background);
+  box-shadow: var(--shadow-sm);
+  animation: fadeInDown 0.3s var(--ease-out-expo);
+}
+
+.error-banner-critical {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+}
+
+.error-banner-warning {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+}
+
+.error-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.error-banner-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.error-banner-text {
+  flex: 1;
+}
+
+.error-banner-title {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.2rem;
+}
+
+.error-banner-message {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.error-banner-retry-info {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-light);
+  font-style: italic;
+}
+
+.error-banner-help {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-light);
+  line-height: 1.6;
+}
+
+.error-banner-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-left: 0.75rem;
+}
+
+.error-banner-button {
+  padding: 0.45rem 0.85rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out-expo);
+}
+
+.error-banner-button-retry {
+  background: var(--primary-color);
+  color: #ffffff;
+}
+
+.error-banner-button-retry:hover {
+  background: var(--secondary-color);
+  transform: translateY(-1px);
+}
+
+.error-banner-button-dismiss {
+  background: transparent;
+  color: var(--text-light);
+  padding: 0.2rem 0.4rem;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.error-banner-button-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (max-width: 640px) {
+  .error-banner {
+    flex-direction: column;
+    padding: 0.85rem;
+  }
+
+  .error-banner-actions {
+    margin-left: 0;
+    margin-top: 0.6rem;
+    width: 100%;
+  }
+
+  .error-banner-button {
+    flex: 1;
+  }
+
+  .error-banner-button-dismiss {
+    flex: 0;
+    align-self: flex-end;
+  }
+}
