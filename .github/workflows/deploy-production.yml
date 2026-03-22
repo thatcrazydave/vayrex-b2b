@@ -70,7 +70,7 @@ jobs:
     if: success()
     environment:
       name: production
-      url: https://vayrex.com
+      url: https://b2b.vayrex.com
     steps:
       - uses: actions/checkout@v4
       
