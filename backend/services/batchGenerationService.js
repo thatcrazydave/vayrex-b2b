@@ -408,7 +408,11 @@ async function processBatchedFile(params) {
       }
     });
 
-    await Promise.all(workers);
+    try {
+      await Promise.all(workers);
+    } finally {
+      queue.length = 0;
+    }
 
     Logger.info('All batches processed', {
       batchCount: batchResults.length,

@@ -80,9 +80,12 @@ async function generateQuestionsPDF(questions, options = {}) {
         // Estimate space needed: question text + options + spacing (~20px per option + 60px base)
         const optionCount = (question.options && question.options.length) || 0;
         const estimatedHeight = 60 + (optionCount * 20) + (fontSize * 2);
+        const pageBottomMargin = doc.page.margins ? doc.page.margins.bottom : 80;
+        const usableHeight = doc.page.height - pageBottomMargin;
         
         // Check if we need a new page (leave room for the question)
-        if (doc.y + estimatedHeight > doc.page.height - 80) {
+        // SAFETY: clamp estimatedHeight to usable page height to prevent infinite addPage loop
+        if (doc.y + Math.min(estimatedHeight, usableHeight) > usableHeight) {
           doc.addPage();
         }
 

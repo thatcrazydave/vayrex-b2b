@@ -39,7 +39,7 @@ export default function Learning() {
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [mode, setMode] = useState("Exam");
-  const [revealedAnswers, setRevealedAnswers] = useState({}); 
+  const [revealedAnswers, setRevealedAnswers] = useState({});
   const [practiceResults, setPracticeResults] = useState({});
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -47,6 +47,7 @@ export default function Learning() {
   const [initialMinutes, setInitialMinutes] = useState(5);
   const [timeLeft, setTimeLeft] = useState(0);
   const timerRef = useRef(null);
+  const handleSubmitRef = useRef(null);
   const [running, setRunning] = useState(false);
   const [resultSummary, setResultSummary] = useState(null);
   const [submitted, setSubmitted] = useState(false);
@@ -68,8 +69,12 @@ export default function Learning() {
       }
     };
     fetchTopics();
-    return () => clearInterval(timerRef.current);
   }, [user]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => clearInterval(timerRef.current);
+  }, []);
 
   useEffect(() => {
     if (questions.length > 0) {
@@ -83,10 +88,12 @@ export default function Learning() {
 
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
-        if (prev <= 0.0167) { 
+        if (prev <= 0.0167) {
           clearInterval(timerRef.current);
           setRunning(false);
-          handleSubmit();
+          // Use ref so we always call the latest handleSubmit,
+          // not a stale closure captured when the effect ran
+          handleSubmitRef.current();
           return 0;
         }
         return prev - 0.0167;
@@ -117,19 +124,19 @@ export default function Learning() {
         questionsData = questionsData.data;
       }
 
-      
+
       if (!questionsData || !Array.isArray(questionsData) || questionsData.length === 0) {
         toast.error(`No questions found for topic "${selectedTopic}". Try uploading some questions first.`);
         setQuestions([]);
         return;
       }
-      
+
       setQuestions(questionsData);
       setAnswers({});
       setRevealedAnswers({});
       setPracticeResults({});
       setActiveIndex(0);
-      
+
       if (mode === "Exam") {
         setTimeLeft(initialMinutes);
         setRunning(true);
@@ -147,8 +154,8 @@ export default function Learning() {
 
   const handleSelect = (questionId, optionIndex) => {
     if (mode === "Exam" && submitted) return;
-    if (mode === "Practice" && revealedAnswers[questionId]) return; 
-    
+    if (mode === "Practice" && revealedAnswers[questionId]) return;
+
     setAnswers(prev => ({ ...prev, [questionId]: optionIndex }));
   };
 
@@ -160,7 +167,7 @@ export default function Learning() {
 
   const handleRevealAnswer = (questionId) => {
     if (mode !== "Practice") return;
-    
+
     const question = questions.find(q => q._id === questionId);
 
     if(!question){
@@ -176,21 +183,21 @@ export default function Learning() {
     }
 
     const selectedIndex = answers[questionId];
-    
+
     // Check current revealed state BEFORE toggling
     const isCurrentlyRevealed = revealedAnswers[questionId];
-    
+
     if (isCurrentlyRevealed) {
       // Hide the answer (doesn't consume a reveal)
-      setRevealedAnswers(prev => ({ 
-        ...prev, 
-        [questionId]: false 
+      setRevealedAnswers(prev => ({
+        ...prev,
+        [questionId]: false
       }));
     } else {
       // Check reveal limit before revealing
       const revealsLimit = user?.limits?.revealsPerQuiz ?? 3;
       const currentReveals = Object.values(revealedAnswers).filter(Boolean).length;
-      
+
       if (revealsLimit !== -1 && currentReveals >= revealsLimit) {
         toast.warning(`You've used all ${revealsLimit} reveals for this quiz. Upgrade your plan for more reveals.`);
         return;
@@ -208,7 +215,7 @@ export default function Learning() {
       } else {
         isCorrect = selectedIndex !== undefined && typeof selectedIndex === 'number' && selectedIndex === question.correctAnswer;
       }
-      
+
       // Set practice results FIRST
       setPracticeResults(prev => ({
         ...prev,
@@ -219,11 +226,11 @@ export default function Learning() {
           selectedText: typeof selectedIndex === 'string' ? selectedIndex : null
         }
       }));
-      
+
       // Then reveal
-      setRevealedAnswers(prev => ({ 
-        ...prev, 
-        [questionId]: true 
+      setRevealedAnswers(prev => ({
+        ...prev,
+        [questionId]: true
       }));
     }
   };
@@ -253,6 +260,10 @@ export default function Learning() {
     });
 
     const timeSpent = (initialMinutes - timeLeft) * 60;
+
+    // Prevent double-submit from timer + manual click race
+    if (submitted) return;
+    setSubmitted(true);
 
     try {
       if (mode === "Exam") {
@@ -312,7 +323,7 @@ export default function Learning() {
               if (qType === 'theory') return count;
               return count + (answer.selectedIndex === question?.correctAnswer ? 1 : 0);
             }, 0);
-            
+
             setResultSummary({
               correctCount,
               total: questions.length,
@@ -347,7 +358,7 @@ export default function Learning() {
             if (qType === 'theory') return count;
             return count + (answer.selectedIndex === question?.correctAnswer ? 1 : 0);
           }, 0);
-          
+
           setResultSummary({
             correctCount,
             total: questions.length,
@@ -372,10 +383,15 @@ export default function Learning() {
     } catch (err) {
       console.error("Submit error:", err);
       toast.error("Failed to submit exam.");
-    } finally {
-      setSubmitted(true);
+      setSubmitted(false); // Allow retry on error
     }
   };
+
+  // Keep ref in sync with the latest handleSubmit so the timer
+  // never calls a stale closure version of it
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit;
+  });
 
   const resetQuiz = () => {
     setQuestions([]);
@@ -398,11 +414,11 @@ export default function Learning() {
   // Generate AI study suggestions based on quiz results
   const generateStudySuggestions = async () => {
     if (!resultSummary || !selectedTopic) return;
-    
+
     setLoadingSuggestions(true);
     try {
       const wrongAnswers = resultSummary.answers.filter(a => !a.isCorrect);
-      
+
       // Extract key concepts from questions for contextual tips
       const questionConcepts = questions.slice(0, 5).map(q => {
         // Get first meaningful words from question
@@ -480,8 +496,8 @@ Can you give me personalized study tips to improve my understanding of ${selecte
             <div className="topic-selection">
               <div className="control-group">
                 <label>Mode</label>
-                <select 
-                  value={mode} 
+                <select
+                  value={mode}
                   onChange={(e) => setMode(e.target.value)}
                 >
                   <option value="Exam">Exam</option>
@@ -513,8 +529,8 @@ Can you give me personalized study tips to improve my understanding of ${selecte
             </div>
 
             <div className="control-buttons">
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 onClick={fetchQuestions}
                 disabled={questions.length > 0 && !submitted}
               >
@@ -583,7 +599,7 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                   <span className="learning-tag subtle">Question {activeIndex + 1}</span>
                 </div>
                 {mode === "Practice" && (
-                  <button 
+                  <button
                     className={`reveal-btn ${revealedAnswers[activeQuestion._id] ? 'revealed' : ''}`}
                     onClick={() => handleRevealAnswer(activeQuestion._id)}
                     title={revealedAnswers[activeQuestion._id] ? "Hide Answer" : "Reveal Answer"}
@@ -740,8 +756,8 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                 <div className="practice-progress">
                   <span className="progress-text">
                     Revealed: {Object.keys(revealedAnswers).filter(id => revealedAnswers[id]).length} / {
-                      (user?.limits?.revealsPerQuiz === -1) 
-                        ? questions.length 
+                      (user?.limits?.revealsPerQuiz === -1)
+                        ? questions.length
                         : Math.min(user?.limits?.revealsPerQuiz ?? 3, questions.length)
                     }
                     {user?.limits?.revealsPerQuiz !== -1 && (
@@ -749,8 +765,8 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                     )}
                   </span>
                   <div className="progress-bar">
-                    <div 
-                      className="progress-fill" 
+                    <div
+                      className="progress-fill"
                       style={{
                         width: `${(Object.keys(revealedAnswers).filter(id => revealedAnswers[id]).length / questions.length) * 100}%`
                       }}
@@ -758,18 +774,18 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                   </div>
                 </div>
                 <div className="practice-actions">
-                  <button 
+                  <button
                     className="btn-secondary"
                     onClick={() => {
                       const revealsLimit = user?.limits?.revealsPerQuiz ?? 3;
                       const currentReveals = Object.values(revealedAnswers).filter(Boolean).length;
                       const allRevealed = {};
                       let revealCount = currentReveals;
-                      
+
                       questions.forEach(q => {
                         if (answers[q._id] !== undefined && !revealedAnswers[q._id]) {
                           if (revealsLimit !== -1 && revealCount >= revealsLimit) return;
-                          
+
                           allRevealed[q._id] = true;
                           revealCount++;
                           const qType = (q.questionType || 'multiple-choice').toLowerCase();
@@ -797,7 +813,7 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                         }
                       });
                       setRevealedAnswers(prev => ({ ...prev, ...allRevealed }));
-                      
+
                       if (revealsLimit !== -1 && revealCount >= revealsLimit) {
                         toast.info(`Reveal limit reached (${revealsLimit} per quiz).`);
                       }
@@ -806,7 +822,7 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                   >
                     Reveal All Answers
                   </button>
-                  <button 
+                  <button
                     className="btn-primary"
                     onClick={handleSubmit}
                     disabled={submitted}
@@ -858,8 +874,8 @@ Can you give me personalized study tips to improve my understanding of ${selecte
               <div className="score-actions">
                 <button className="btn-primary" onClick={closeScorePopup}>Close</button>
                 <button className="btn-secondary" onClick={resetQuiz}>Start New Quiz</button>
-                <button 
-                  className="btn-ai" 
+                <button
+                  className="btn-ai"
                   onClick={generateStudySuggestions}
                   disabled={loadingSuggestions || !isOnline}
                   title={!isOnline ? "AI features require internet connection" : "Get personalized study tips"}
@@ -867,7 +883,7 @@ Can you give me personalized study tips to improve my understanding of ${selecte
                   {loadingSuggestions ? 'Generating...' : 'AI Study Tips'}
                 </button>
               </div>
-              
+
               {aiSuggestions && (
                 <div className="ai-suggestions">
                   <h4>AI Study Suggestions</h4>

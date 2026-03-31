@@ -20,7 +20,7 @@
 const Logger = require('../logger');
 const crypto = require('crypto');
 
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const IS_PRODUCTION = !['development', 'test', 'local'].includes(process.env.NODE_ENV);
 
 // ========== 12 CANONICAL ERROR CODES ==========
 // All error responses in production are mapped to one of these.

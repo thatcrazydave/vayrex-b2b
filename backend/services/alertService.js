@@ -2,6 +2,13 @@ const SystemAlert = require('../models/SystemAlert');
 const Logger = require('../logger');
 const mongoose = require('mongoose');
 const { taskQueue } = require('./taskQueue');
+let emailService;
+try {
+  emailService = require('./emailService');
+} catch (err) {
+  Logger.warn('emailService not available for alerts', { error: err.message });
+  emailService = null;
+}
 
 class AlertService {
   static async createAlert(typeOrObj, severity, service, message, details = {}) {
@@ -47,8 +54,8 @@ class AlertService {
       }).select('email');
 
       const emailPromises = admins.map(admin =>
-        emailService.sendAlertEmail(admin.email, alert)
-      );
+        emailService?.sendAlertEmail?.(admin.email, alert)
+      ).filter(Boolean);
 
       await Promise.all(emailPromises);
 
@@ -245,23 +252,35 @@ class AlertService {
   }
 }
 
-// Schedule periodic health checks
-setInterval(() => {
+// Schedule periodic health checks — store IDs for cleanup
+const _healthCheckInterval = setInterval(() => {
   AlertService.checkSystemHealth().catch(err =>
     Logger.error('Health check error', { error: err.message })
   );
 }, 5 * 60 * 1000); // Every 5 minutes
 
-setInterval(() => {
+const _apiMonitorInterval = setInterval(() => {
   AlertService.monitorApiPerformance().catch(err =>
     Logger.error('API monitoring error', { error: err.message })
   );
 }, 10 * 60 * 1000); // Every 10 minutes
 
-setInterval(() => {
+const _taskQueueInterval = setInterval(() => {
   AlertService.monitorTaskQueue().catch(err =>
     Logger.error('Task Queue monitoring error', { error: err.message })
   );
 }, 2 * 60 * 1000); // Every 2 minutes
+
+// Graceful shutdown: clear intervals
+process.on('SIGTERM', () => {
+  clearInterval(_healthCheckInterval);
+  clearInterval(_apiMonitorInterval);
+  clearInterval(_taskQueueInterval);
+});
+process.on('SIGINT', () => {
+  clearInterval(_healthCheckInterval);
+  clearInterval(_apiMonitorInterval);
+  clearInterval(_taskQueueInterval);
+});
 
 module.exports = AlertService;

@@ -49,7 +49,7 @@ const initializeRedis = async () => {
     });
 
     redisClient.on('connect', () => {
-      isConnected = true;  // Mark as connected
+      // TCP connected, but not yet ready (AUTH/SELECT pending)
       Logger.info('  Redis Client Connected');
     });
 

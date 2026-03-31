@@ -774,13 +774,15 @@ const advancedAttackLimiter = async (req, res, next) => {
     }
 
     // ---- CONCURRENT REQUEST CAP ----
+    // SECURITY FIX: Increment BEFORE check to prevent race condition
+    trackConcurrentOpen(ip);
     if (checkConcurrentCap(ip)) {
+      trackConcurrentClose(ip); // Undo increment since we're rejecting
       Logger.warn('[CONCURRENT] Too many simultaneous requests', { ip, path });
       return rejectAttack(res, 'ATTACK_CONCURRENT_CAP', 10, true);
     }
 
     // Track concurrent (decrement on close)
-    trackConcurrentOpen(ip);
     res.on('close', () => {
       trackConcurrentClose(ip);
       trackConnectionClose(ip);
@@ -855,10 +857,12 @@ const advancedAttackLimiter = async (req, res, next) => {
     if (signupResult === 'throttle') {
       // Global signup velocity exceeded — delay this request by 30s
       return setTimeout(() => {
-        res.status(429).json({
-          success: false,
-          error: { code: 'RATE_LIMITED', message: 'Request blocked' }
-        });
+        if (!res.headersSent) {
+          res.status(429).json({
+            success: false,
+            error: { code: 'RATE_LIMITED', message: 'Request blocked' }
+          });
+        }
       }, CONFIG.GLOBAL_SIGNUP_COOLDOWN_S * 1000);
     }
 

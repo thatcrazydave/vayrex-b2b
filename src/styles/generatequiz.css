@@ -1955,6 +1955,11 @@
   transform: scale(1.05);
 }
 
+/* Mobile backdrop — hidden by default, only shown via JS class on mobile */
+.course-mobile-backdrop {
+  display: none;
+}
+
 /* ── Course view mobile ── */
 @media (max-width: 900px) {
   .course-sidebar {
@@ -1971,45 +1976,89 @@
 }
 
 @media (max-width: 700px) {
+  /* Keep the fixed full-screen container — no stacking */
   .course-view {
-    flex-direction: column;
-    height: auto;
-    min-height: calc(100vh - 60px);
-    position: relative;
-    top: 0;
-  }
-
-  .course-sidebar {
-    width: 100%;
-    max-height: 200px;
-    border-right: none;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .course-sidebar.closed {
-    max-height: 0;
-    width: 100%;
+    flex-direction: row;
+    position: fixed;
+    top: 60px;
+    height: calc(100vh - 60px);
     overflow: hidden;
   }
 
+  /* Left sidebar → overlay drawer that slides in from the left */
+  .course-sidebar {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 300px) !important;
+    max-height: none;
+    border-right: 1px solid var(--border-color);
+    border-bottom: none;
+    z-index: 999;
+    transform: translateX(0);
+    transition: transform 0.28s ease;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.2);
+    overflow-y: auto;
+  }
+
+  .course-sidebar.closed {
+    transform: translateX(-105%);
+    width: min(82vw, 300px) !important;
+    max-height: none;
+    overflow: hidden;
+  }
+
+  /* Main content always fills the full available width */
   .course-main {
-    overflow: visible;
+    flex: 1;
+    width: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .course-resize-handle {
     display: none;
   }
 
+  /* AI Tutor / side panel → full-screen overlay from the right */
   .course-side-panel {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100% !important;
-    height: 400px;
+    height: auto;
     border-left: none;
-    border-top: 1px solid var(--border-color);
+    border-top: none;
+    z-index: 999;
+    transform: translateX(0);
+    transition: transform 0.28s ease;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .course-side-panel.closed {
-    height: 0;
+    transform: translateX(105%);
     width: 100% !important;
+    height: auto;
+    opacity: 1;
+    pointer-events: none;
+    border-left: none;
+  }
+
+  /* Backdrop scrim behind open drawers */
+  .course-mobile-backdrop {
+    display: block;
+    position: fixed;
+    top: 60px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 998;
+    background: rgba(0, 0, 0, 0.45);
+    cursor: pointer;
   }
 
   .course-fab-wrapper {
@@ -2023,6 +2072,20 @@
     left: 12px;
     width: auto;
     max-height: 50vh;
+  }
+}
+
+@media (max-width: 480px) {
+  .course-sidebar {
+    top: 56px;
+  }
+
+  .course-side-panel {
+    top: 56px;
+  }
+
+  .course-mobile-backdrop {
+    top: 56px;
   }
 }
 

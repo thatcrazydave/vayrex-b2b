@@ -29,6 +29,7 @@ const PasswordValidator = {
   validate: (password) => {
     const errors = [];
     const minLength = 8;
+    const maxLength = 72; // BCrypt silently truncates beyond 72 chars
 
     if (!password) {
       errors.push('Password is required');
@@ -37,6 +38,10 @@ const PasswordValidator = {
 
     if (password.length < minLength) {
       errors.push(`Password must be at least ${minLength} characters`);
+    }
+
+    if (password.length > maxLength) {
+      errors.push(`Password must not exceed ${maxLength} characters`);
     }
 
     if (!/[A-Z]/.test(password)) {

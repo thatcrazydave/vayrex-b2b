@@ -345,9 +345,10 @@ function sliceRepresentativeContext(text, topic = '', targetChunks = 5, chunkSiz
   if (!text || text.length < chunkSize) return text;
 
   const totalLength = text.length;
+  const MAX_CHUNKS = Math.min(Math.ceil(totalLength / chunkSize), 500);
   // Step 1: Split into equal-ish chunks
   const allChunks = [];
-  for (let i = 0; i < totalLength; i += chunkSize) {
+  for (let i = 0; i < totalLength && allChunks.length < MAX_CHUNKS; i += chunkSize) {
     let end = i + chunkSize;
     // Align end to a newline if possible to avoid cutting sentences
     if (end < totalLength) {

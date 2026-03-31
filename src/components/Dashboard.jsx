@@ -81,6 +81,7 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
+    let cancelled = false;
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
@@ -88,6 +89,8 @@ const Dashboard = () => {
           API.get("/user/uploads"),
           API.get("/results")
         ]);
+
+        if (cancelled) return;
 
         const uploads = uploadsRes.data?.data || [];
         const results = resultsRes.data?.data || [];
@@ -114,16 +117,17 @@ const Dashboard = () => {
           }
         });
       } catch (err) {
+        if (cancelled) return;
         console.error("Error fetching dashboard data:", err);
         // Use standardized error handler - this will stop loading
         handleApiError(err, setLoading, setError);
       } finally {
-        // Ensure loading is always stopped
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     fetchDashboardData();
+    return () => { cancelled = true; };
   }, []);
 
   const formatDate = (dateString) => {

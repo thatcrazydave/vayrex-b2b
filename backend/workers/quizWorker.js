@@ -258,10 +258,13 @@ const worker = new Worker('background-tasks', async (job) => {
     } catch (error) {
         if (error.message === 'DELAYED_BY_CIRCUIT_BREAKER') {
             Logger.warn(`Job ${job.id} postponed: AI Circuit Breaker is OPEN`);
+            // Decrement before delaying so the counter isn't double-counted when job re-enters
+            if (job?.data?.userId) {
+                await decrementUserActiveJobs(job.data.userId).catch(err => {
+                    Logger.warn('Failed to decrement active jobs before circuit breaker delay', { error: err.message });
+                });
+            }
             await job.moveToDelayed(Date.now() + 120000);
-            // Return a sentinel so BullMQ marks the job as "completed" but
-            // we skip decrementing the user's active-job counter since the
-            // job will re-enter the queue when the delay expires.
             return { __circuitBreakerDelayed: true };
         }
         Logger.error(`Worker error in job ${job.id}:`, { error: error.message, stack: error.stack });

@@ -138,7 +138,7 @@ function renderTutorMarkdown(text) {
 
   let textWithTokens = text.replace(/\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g, (_, a, b) => {
     const latex = (a ?? b).trim();
-    const token = `__DISPLAYMATH_${mathBlocks.length}__`;
+    const token = `\n__DISPLAYMATH_${mathBlocks.length}__\n`;
     mathBlocks.push(latex);
     return token;
   });
@@ -149,8 +149,8 @@ function renderTutorMarkdown(text) {
   textWithTokens = textWithTokens.replace(
     /(?<![`\w])\\(?:d|t|c)?frac\{(?:[^{}]|\{[^{}]*\})*\}\{(?:[^{}]|\{[^{}]*\})*\}|\\sqrt(?:\[[^\]]*\])?\{(?:[^{}]|\{[^{}]*\})*\}/g,
     (m) => {
-      if (m.startsWith('__DISPLAYMATH_')) return m;
-      const token = `__DISPLAYMATH_${mathBlocks.length}__`;
+      if (m.indexOf('__DISPLAYMATH_') !== -1) return m;
+      const token = `\n__DISPLAYMATH_${mathBlocks.length}__\n`;
       mathBlocks.push(m.trim());
       return token;
     }
@@ -291,7 +291,7 @@ function GenerateQuiz() {
   const [tutorMessages, setTutorMessages] = useState([]);   // [{role, content}]
   const [tutorInput, setTutorInput] = useState('');
   const [tutorLoading, setTutorLoading] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth > 700);
   const [isTutorOpen, setIsTutorOpen] = useState(true);
   const tutorEndRef = useRef(null);
   const tutorInputRef = useRef(null);
@@ -353,6 +353,10 @@ function GenerateQuiz() {
   const [outlineDepthAcknowledged, setOutlineDepthAcknowledged] = useState(false);
   const [outlineStreamProgress, setOutlineStreamProgress] = useState([]); // live chapter progress
   const [outlineStreamController, setOutlineStreamController] = useState(null); // AbortController for SSE
+  // Cleanup SSE AbortController on unmount
+  useEffect(() => {
+    return () => { if (outlineStreamController) outlineStreamController.abort(); };
+  }, [outlineStreamController]);
   const [outlinePdfExporting, setOutlinePdfExporting] = useState(false);
   const [summaryPdfExporting, setSummaryPdfExporting] = useState(false);
   const [outlineParsing, setOutlineParsing] = useState(false);           // pre-flight loading
@@ -371,7 +375,7 @@ function GenerateQuiz() {
   );
 
   // ── Unified Side Panel ──
-  const [activeSidePanel, setActiveSidePanel] = useState('tutor'); // 'tutor' | 'notes' | 'highlights' | null
+  const [activeSidePanel, setActiveSidePanel] = useState(() => window.innerWidth > 700 ? 'tutor' : null); // 'tutor' | 'notes' | 'highlights' | null
   const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
 
   // Cache CSRF token to avoid fetching on every request
@@ -1754,7 +1758,13 @@ function GenerateQuiz() {
         let finished = false;
 
         while (!finished) {
-          const { value, done } = await reader.read();
+          let value, done;
+          try {
+            ({ value, done } = await reader.read());
+          } catch (readErr) {
+            console.error('SSE stream read error:', readErr);
+            break;
+          }
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
@@ -1763,9 +1773,11 @@ function GenerateQuiz() {
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed) continue;
-            const payload = JSON.parse(trimmed);
-            finished = handleJobUpdate(payload);
-            if (finished) break;
+            try {
+              const payload = JSON.parse(trimmed);
+              finished = handleJobUpdate(payload);
+              if (finished) break;
+            } catch { /* skip malformed line */ }
           }
         }
 
@@ -2097,19 +2109,53 @@ function GenerateQuiz() {
             />
           ];
         }
-        return seg.content.split('\n').flatMap((line, li) => {
-          if (!line.trim()) return [<br key={`${baseKey}-br-${idx}-${li}`} />];
-          return [
-            <p key={`${baseKey}-p-${idx}-${li}`} className="course-teaching-text">
-              {renderInlineMarkdown(line)}
-            </p>
-          ];
+        
+        // Extract display math blocks BEFORE line splitting
+        const MATH_BLOCK_RE = /(\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/g;
+        const mathSegments = seg.content.split(MATH_BLOCK_RE);
+        
+        return mathSegments.flatMap((mSeg, mIdx) => {
+          if (!mSeg) return [];
+          
+          if (mSeg.startsWith('\\[') || mSeg.startsWith('$$')) {
+             let latex = mSeg.startsWith('\\[') ? mSeg.slice(2, -2) : mSeg.slice(2, -2);
+             latex = latex.trim();
+             let html;
+             try { html = katex.renderToString(latex, { displayMode: true, throwOnError: false, output: 'html' }); } catch { html = null; }
+             if (html) {
+                 return [<div key={`${baseKey}-math-${idx}-${mIdx}`} className="course-katex-display" dangerouslySetInnerHTML={{ __html: html }} />];
+             } else {
+                 return [<div key={`${baseKey}-math-${idx}-${mIdx}`} className="course-katex-display">{mSeg}</div>];
+             }
+          }
+          
+          // Normal text
+          const lines = mSeg.split('\n');
+          // Clean up boundary newlines created by the match splitting
+          if (lines.length > 0 && lines[0] === '') lines.shift();
+          if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+          return lines.flatMap((line, li) => {
+            if (!line.trim()) return [<br key={`${baseKey}-br-${idx}-${mIdx}-${li}`} />];
+            return [
+              <p key={`${baseKey}-p-${idx}-${mIdx}-${li}`} className="course-teaching-text">
+                {renderInlineMarkdown(line)}
+              </p>
+            ];
+          });
         });
       });
     };
 
     return (
       <div className="course-view">
+        {/* Mobile backdrop — closes open drawers when tapped */}
+        {(isSidebarOpen || activeSidePanel) && (
+          <div
+            className="course-mobile-backdrop"
+            onClick={() => { setIsSidebarOpen(false); setActiveSidePanel(null); }}
+          />
+        )}
         {/* ── Left Sidebar ── */}
         <aside className={`course-sidebar ${isSidebarOpen ? 'open' : 'closed'}`}>
           <div className="course-sidebar-header">

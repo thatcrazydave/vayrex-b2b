@@ -83,14 +83,14 @@ const TokenService = {
   revokeToken: async (jti, expiresIn = 604800) => {
     try {
       if (!isRedisReady()) {
-        Logger.warn('Redis not ready, token revocation skipped', { jti });
-        return false;
+        Logger.error('Redis not ready, token revocation FAILED - this is a security risk', { jti });
+        throw new Error('Token revocation failed: Redis unavailable');
       }
 
       const client = getRedisClient();
       if (!client) {
-        Logger.warn('Redis client unavailable, token revocation skipped', { jti });
-        return false;
+        Logger.error('Redis client unavailable, token revocation FAILED', { jti });
+        throw new Error('Token revocation failed: Redis client unavailable');
       }
       
       const redisKey = `token:blacklist:jti:${jti}`;
@@ -227,7 +227,7 @@ const TokenService = {
     try {
       return jwt.verify(
         token,
-        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+        process.env.JWT_REFRESH_SECRET,
         { algorithms: ['HS256'] }
       );
     } catch (err) {

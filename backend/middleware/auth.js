@@ -1,20 +1,20 @@
-const jwt = require('jsonwebtoken');
-const mongoose = require('mongoose');
-const User = require('../models/User');
-const TokenService = require('../services/tokenService');
-const Logger = require('../logger');
-const PricingConfig = require('../models/PricingConfig');
-const crypto = require('crypto');
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const User = require("../models/User");
+const TokenService = require("../services/tokenService");
+const Logger = require("../logger");
+const PricingConfig = require("../models/PricingConfig");
+const crypto = require("crypto");
 
 // Request fingerprinting for additional security
 function generateRequestFingerprint(req) {
   const components = [
-    req.headers['user-agent'] || '',
-    req.headers['accept-language'] || '',
-    req.headers['accept-encoding'] || ''
-  ].join('|');
+    req.headers["user-agent"] || "",
+    req.headers["accept-language"] || "",
+    req.headers["accept-encoding"] || "",
+  ].join("|");
 
-  return crypto.createHash('sha256').update(components).digest('hex');
+  return crypto.createHash("sha256").update(components).digest("hex");
 }
 
 /**
@@ -23,8 +23,8 @@ function generateRequestFingerprint(req) {
  */
 const identifyUser = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const authHeader = req.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];
 
     if (!token) return next();
 
@@ -38,7 +38,7 @@ const identifyUser = async (req, res, next) => {
       email: decoded.email,
       role: decoded.role,
       subscriptionTier: decoded.subscriptionTier,
-      tokenVersion: decoded.tokenVersion || 0
+      tokenVersion: decoded.tokenVersion || 0,
     };
   } catch (err) {
     // Ignore verification errors for identification ONLY
@@ -54,26 +54,25 @@ const authenticateToken = async (req, res, next) => {
     // SECURITY LAYER 1: Extract token
     // Priority 1: Authorization header (for tab-isolated sessionStorage tokens)
     // Priority 2: Cookie (for backward compatibility during migration)
-    const authHeader = req.headers['authorization'];
-    let token = authHeader && authHeader.split(' ')[1];
-
+    const authHeader = req.headers["authorization"];
+    let token = authHeader && authHeader.split(" ")[1];
 
     if (!token) {
-      Logger.warn('Authentication attempt without token', {
+      Logger.warn("Authentication attempt without token", {
         ip: req.ip,
         path: req.path,
         method: req.method,
         hasAuthHeader: !!authHeader,
-        hasCookie: !!(req.cookies && req.cookies.token)
+        hasCookie: !!(req.cookies && req.cookies.token),
       });
 
       return res.status(401).json({
         success: false,
         error: {
-          code: 'NO_TOKEN',
-          message: 'Access token required',
-          timestamp: new Date().toISOString()
-        }
+          code: "NO_TOKEN",
+          message: "Access token required",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
@@ -82,31 +81,33 @@ const authenticateToken = async (req, res, next) => {
     try {
       decoded = TokenService.verifyAccessToken(token);
     } catch (err) {
-      const isExpired = err.message.includes('expired');
-      const isVerifyPath = req.path.includes('/auth/verify');
+      const isExpired = err.message.includes("expired");
+      const isVerifyPath = req.path.includes("/auth/verify");
 
       if (isExpired && isVerifyPath) {
         // Silently handle expiration for the background verification endpoint
         // This prevents log clutter for expected session expirations
-        Logger.debug('Token expired during background verification', {
+        Logger.debug("Token expired during background verification", {
           ip: req.ip,
-          path: req.path
+          path: req.path,
         });
       } else {
-        Logger.warn('Token verification failed', {
+        Logger.warn("Token verification failed", {
           error: err.message,
           ip: req.ip,
-          path: req.path
+          path: req.path,
         });
       }
 
       return res.status(401).json({
         success: false,
         error: {
-          code: 'INVALID_TOKEN',
-          message: err.message.includes('expired') ? 'Access token expired' : 'Invalid access token',
-          timestamp: new Date().toISOString()
-        }
+          code: "INVALID_TOKEN",
+          message: err.message.includes("expired")
+            ? "Access token expired"
+            : "Invalid access token",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
@@ -116,105 +117,110 @@ const authenticateToken = async (req, res, next) => {
       isRevoked = await TokenService.isTokenRevoked(decoded.jti);
     } catch (revokeErr) {
       // Redis is down or unavailable
-      const criticalOperations = ['/auth/logout', '/auth/change-password', '/auth/delete-account', '/admin'];
-      const isCriticalOperation = criticalOperations.some(op => req.path.includes(op));
+      const criticalOperations = [
+        "/auth/logout",
+        "/auth/change-password",
+        "/auth/delete-account",
+        "/admin",
+      ];
+      const isCriticalOperation = criticalOperations.some((op) => req.path.includes(op));
 
       if (isCriticalOperation) {
         // Fail-closed for critical operations
-        Logger.error('Token revocation check failed for critical operation', {
+        Logger.error("Token revocation check failed for critical operation", {
           error: revokeErr.message,
           jti: decoded.jti,
           path: req.path,
-          userId: decoded.id
+          userId: decoded.id,
         });
         return res.status(503).json({
           success: false,
           error: {
-            code: 'SERVICE_UNAVAILABLE',
-            message: 'Service temporarily unavailable. Please try again later.'
-          }
+            code: "SERVICE_UNAVAILABLE",
+            message: "Service temporarily unavailable. Please try again later.",
+          },
         });
       }
 
       // Fail-open for non-critical operations
-      Logger.warn('Token revocation check skipped (Redis unavailable)', {
+      Logger.warn("Token revocation check skipped (Redis unavailable)", {
         error: revokeErr.message,
         jti: decoded.jti,
         path: req.path,
-        userId: decoded.id
+        userId: decoded.id,
       });
       isRevoked = false;
     }
 
     if (isRevoked) {
-      Logger.warn('Revoked token used', {
+      Logger.warn("Revoked token used", {
         userId: decoded.id,
         jti: decoded.jti,
         ip: req.ip,
-        path: req.path
+        path: req.path,
       });
 
       return res.status(401).json({
         success: false,
         error: {
-          code: 'TOKEN_REVOKED',
-          message: 'Token has been revoked',
-          timestamp: new Date().toISOString()
-        }
+          code: "TOKEN_REVOKED",
+          message: "Token has been revoked",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     // SECURITY LAYER 4: Fetch user from database (fresh data)
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.id).select("-password");
 
     if (!user) {
-      Logger.warn('Token for non-existent user', {
+      Logger.warn("Token for non-existent user", {
         tokenUserId: decoded.id,
-        ip: req.ip
+        ip: req.ip,
       });
 
       return res.status(403).json({
         success: false,
         error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User account not found',
-          timestamp: new Date().toISOString()
-        }
+          code: "USER_NOT_FOUND",
+          message: "User account not found",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     // SECURITY LAYER 5: Check user account status
     if (!user.isActive) {
-      Logger.warn('Inactive user attempted access', {
+      Logger.warn("Inactive user attempted access", {
         userId: user._id,
         email: user.email,
-        ip: req.ip
+        ip: req.ip,
       });
 
       return res.status(403).json({
         success: false,
         error: {
-          code: 'USER_INACTIVE',
-          message: 'User account is inactive',
-          timestamp: new Date().toISOString()
-        }
+          code: "USER_INACTIVE",
+          message: "User account is inactive",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     if (user.isDeleted) {
-      Logger.warn('Deleted user attempted access', {
+      Logger.warn("Deleted user attempted access", {
         userId: user._id,
         email: user.email,
-        ip: req.ip
+        ip: req.ip,
       });
 
       return res.status(403).json({
         success: false,
         error: {
-          code: 'USER_DELETED',
-          message: 'User account has been deleted',
-          timestamp: new Date().toISOString()
-        }
+          code: "USER_DELETED",
+          message: "User account has been deleted",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
@@ -223,63 +229,64 @@ const authenticateToken = async (req, res, next) => {
     const userTokenVersion = user.tokenVersion || 0;
 
     if (tokenVersion !== userTokenVersion) {
-      Logger.warn('Token version mismatch detected', {
+      Logger.warn("Token version mismatch detected", {
         userId: user._id,
         tokenVersion,
         userTokenVersion,
-        reason: 'Role or permissions changed'
+        reason: "Role or permissions changed",
       });
 
       return res.status(401).json({
         success: false,
         error: {
-          code: 'TOKEN_VERSION_MISMATCH',
-          message: 'User permissions have changed. Please log in again.',
+          code: "TOKEN_VERSION_MISMATCH",
+          message: "User permissions have changed. Please log in again.",
           timestamp: new Date().toISOString(),
-          requiresReauth: true
-        }
+          requiresReauth: true,
+        },
       });
     }
 
     // SECURITY LAYER 7: Verify role in token matches DB (double-check)
     if (decoded.role !== user.role) {
-      Logger.error('Role mismatch between token and database', {
+      Logger.error("Role mismatch between token and database", {
         userId: user._id,
         tokenRole: decoded.role,
         dbRole: user.role,
-        critical: true
+        critical: true,
       });
 
       return res.status(401).json({
         success: false,
         error: {
-          code: 'ROLE_MISMATCH',
-          message: 'Security verification failed. Please log in again.',
+          code: "ROLE_MISMATCH",
+          message: "Security verification failed. Please log in again.",
           timestamp: new Date().toISOString(),
-          requiresReauth: true
-        }
+          requiresReauth: true,
+        },
       });
     }
 
     // SECURITY LAYER 8: Check subscription expiry (atomic operation to prevent race conditions)
-    if (user.isSubscriptionExpired && user.isSubscriptionExpired() && user.subscriptionTier !== 'free') {
+    if (
+      user.isSubscriptionExpired &&
+      user.isSubscriptionExpired() &&
+      user.subscriptionTier !== "free"
+    ) {
       // Use atomic update to prevent concurrent modification issues
-      await mongoose.model('User').findByIdAndUpdate(
-        user._id,
-        {
-          $set: {
-            subscriptionTier: 'free',
-            subscriptionStatus: 'expired'
-          }
-        }
-      );
+      await mongoose.model("User").findByIdAndUpdate(user._id, {
+        $set: {
+          subscriptionTier: "free",
+          subscriptionStatus: "expired",
+        },
+      });
 
       // Update local user object
-      user.subscriptionTier = 'free';
-      user.subscriptionStatus = 'expired';
+      user.subscriptionTier = "free";
+      user.subscriptionStatus = "expired";
 
-      Logger.info('User subscription expired, downgraded to free', {
-        userId: user._id
+      Logger.info("User subscription expired, downgraded to free", {
+        userId: user._id,
       });
     }
 
@@ -293,32 +300,32 @@ const authenticateToken = async (req, res, next) => {
     req.authTime = Date.now() - startTime;
 
     // Log successful authentication for audit trail
-    if (req.path.includes('/admin')) {
-      Logger.info('Admin route accessed', {
+    if (req.path.includes("/admin")) {
+      Logger.info("Admin route accessed", {
         userId: user._id,
         role: user.role,
         path: req.path,
         method: req.method,
-        authTime: req.authTime
+        authTime: req.authTime,
       });
     }
 
     next();
   } catch (err) {
-    Logger.error('Authentication error', {
+    Logger.error("Authentication error", {
       error: err.message,
       stack: err.stack,
       ip: req.ip,
-      path: req.path
+      path: req.path,
     });
 
     return res.status(403).json({
       success: false,
       error: {
-        code: 'AUTH_ERROR',
-        message: 'Authentication failed',
-        timestamp: new Date().toISOString()
-      }
+        code: "AUTH_ERROR",
+        message: "Authentication failed",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 };
@@ -326,41 +333,41 @@ const authenticateToken = async (req, res, next) => {
 // Enhanced requireAdmin with strict role validation
 const requireAdmin = (req, res, next) => {
   if (!req.user) {
-    Logger.error('requireAdmin called without authenticated user', {
+    Logger.error("requireAdmin called without authenticated user", {
       path: req.path,
-      ip: req.ip
+      ip: req.ip,
     });
 
     return res.status(401).json({
       success: false,
       error: {
-        code: 'UNAUTHORIZED',
-        message: 'Authentication required',
-        timestamp: new Date().toISOString()
-      }
+        code: "UNAUTHORIZED",
+        message: "Authentication required",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 
   const userRole = req.user.role;
-  const allowedRoles = ['admin', 'superadmin'];
+  const allowedRoles = ["admin", "superadmin"];
 
   if (!allowedRoles.includes(userRole)) {
-    Logger.warn('Non-admin user attempted admin access', {
+    Logger.warn("Non-admin user attempted admin access", {
       userId: req.user._id,
       username: req.user.username,
       role: userRole,
       path: req.path,
       method: req.method,
-      ip: req.ip
+      ip: req.ip,
     });
 
     return res.status(403).json({
       success: false,
       error: {
-        code: 'INSUFFICIENT_PERMISSIONS',
-        message: 'Admin privileges required',
-        timestamp: new Date().toISOString()
-      }
+        code: "INSUFFICIENT_PERMISSIONS",
+        message: "Admin privileges required",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 
@@ -373,32 +380,32 @@ const requireSuperAdmin = (req, res, next) => {
     return res.status(401).json({
       success: false,
       error: {
-        code: 'UNAUTHORIZED',
-        message: 'Authentication required',
-        timestamp: new Date().toISOString()
-      }
+        code: "UNAUTHORIZED",
+        message: "Authentication required",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 
-  if (req.user.role !== 'superadmin') {
-    Logger.warn('Non-superadmin attempted superadmin action', {
+  if (req.user.role !== "superadmin") {
+    Logger.warn("Non-superadmin attempted superadmin action", {
       userId: req.user._id,
       username: req.user.username,
       role: req.user.role,
       path: req.path,
       method: req.method,
-      ip: req.ip
+      ip: req.ip,
     });
 
     return res.status(403).json({
       success: false,
       error: {
-        code: 'INSUFFICIENT_PERMISSIONS',
-        message: 'SuperAdmin privileges required',
-        requiredRole: 'superadmin',
+        code: "INSUFFICIENT_PERMISSIONS",
+        message: "SuperAdmin privileges required",
+        requiredRole: "superadmin",
         currentRole: req.user.role,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 
@@ -412,15 +419,26 @@ const checkUploadLimit = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         error: {
-          code: 'NOT_AUTHENTICATED',
-          message: 'Authentication required'
-        }
+          code: "NOT_AUTHENTICATED",
+          message: "Authentication required",
+        },
       });
     }
 
     // NEW: Fetch global pricing config for dynamic limits
     const config = await PricingConfig.getConfig();
     const tierLimits = config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
+
+    if (!tierLimits) {
+      Logger.error('No tier limits found for user', { tier: req.user.subscriptionTier, userId: req.user._id });
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'Unable to determine upload limits. Please contact support.',
+        },
+      });
+    }
 
     const monthlyLimit = tierLimits.uploadsPerMonth;
     const dailyLimit = tierLimits.uploadsPerDay;
@@ -430,13 +448,13 @@ const checkUploadLimit = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'UPLOAD_LIMIT_REACHED',
+          code: "UPLOAD_LIMIT_REACHED",
           message: `Monthly upload limit reached (${monthlyLimit}). Please upgrade for more.`,
           current: req.user.usage.uploadsThisMonth,
           limit: monthlyLimit,
           tier: req.user.subscriptionTier,
-          upgradeRequired: true
-        }
+          upgradeRequired: true,
+        },
       });
     }
 
@@ -445,25 +463,25 @@ const checkUploadLimit = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         error: {
-          code: 'DAILY_LIMIT_REACHED',
+          code: "DAILY_LIMIT_REACHED",
           message: `Daily upload limit reached (${dailyLimit}). Please wait until tomorrow or upgrade.`,
           current: req.user.usage.uploadsToday,
           limit: dailyLimit,
           tier: req.user.subscriptionTier,
-          upgradeRequired: true
-        }
+          upgradeRequired: true,
+        },
       });
     }
 
     next();
   } catch (err) {
-    console.error('Upload limit check error:', err);
+    console.error("Upload limit check error:", err);
     return res.status(500).json({
       success: false,
       error: {
-        code: 'SERVER_ERROR',
-        message: 'Error checking upload limits'
-      }
+        code: "SERVER_ERROR",
+        message: "Error checking upload limits",
+      },
     });
   }
 };
@@ -475,9 +493,9 @@ const checkFileSize = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         error: {
-          code: 'NOT_AUTHENTICATED',
-          message: 'Authentication required'
-        }
+          code: "NOT_AUTHENTICATED",
+          message: "Authentication required",
+        },
       });
     }
 
@@ -492,31 +510,45 @@ const checkFileSize = async (req, res, next) => {
     const files = req.files.file || req.files.files;
     const fileArray = Array.isArray(files) ? files : [files];
 
+    // SECURITY: Limit file count per request to prevent DoS
+    const MAX_FILES_PER_REQUEST = 10;
+    if (fileArray.length > MAX_FILES_PER_REQUEST) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'TOO_MANY_FILES',
+          message: `Maximum ${MAX_FILES_PER_REQUEST} files allowed per request`,
+          count: fileArray.length,
+          limit: MAX_FILES_PER_REQUEST,
+        },
+      });
+    }
+
     for (const file of fileArray) {
       const fileSizeMB = file.size / (1024 * 1024);
       if (fileSizeMB > maxSizeMB) {
         return res.status(413).json({
           success: false,
           error: {
-            code: 'FILE_TOO_LARGE',
+            code: "FILE_TOO_LARGE",
             message: `File size exceeds the maximum allowed limit of ${maxSizeMB}MB`,
             fileSize: fileSizeMB.toFixed(2),
             maxSize: maxSizeMB,
-            tier: req.user.subscriptionTier
-          }
+            tier: req.user.subscriptionTier,
+          },
         });
       }
     }
 
     next();
   } catch (err) {
-    console.error('File size check error:', err);
+    console.error("File size check error:", err);
     return res.status(500).json({
       success: false,
       error: {
-        code: 'SERVER_ERROR',
-        message: 'Error checking file size'
-      }
+        code: "SERVER_ERROR",
+        message: "Error checking file size",
+      },
     });
   }
 };
@@ -528,9 +560,9 @@ const checkStorageLimit = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         error: {
-          code: 'NOT_AUTHENTICATED',
-          message: 'Authentication required'
-        }
+          code: "NOT_AUTHENTICATED",
+          message: "Authentication required",
+        },
       });
     }
 
@@ -548,38 +580,38 @@ const checkStorageLimit = async (req, res, next) => {
     const files = req.files.file || req.files.files;
     const fileArray = Array.isArray(files) ? files : [files];
 
-    fileArray.forEach(file => {
-      incomingSizeMB += (file.size / (1024 * 1024));
+    fileArray.forEach((file) => {
+      incomingSizeMB += file.size / (1024 * 1024);
     });
 
     const currentUsageMB = req.user.usage?.storageUsedMB || 0;
 
-    if ((currentUsageMB + incomingSizeMB) > maxStorageMB) {
+    if (currentUsageMB + incomingSizeMB > maxStorageMB) {
       const remaining = Math.max(0, maxStorageMB - currentUsageMB);
       return res.status(507).json({
         success: false,
         error: {
-          code: 'STORAGE_LIMIT_REACHED',
+          code: "STORAGE_LIMIT_REACHED",
           message: `Storage limit reached. You have ${remaining.toFixed(2)}MB remaining.`,
           fileSize: incomingSizeMB.toFixed(2),
           storageUsed: currentUsageMB.toFixed(2),
           storageLimit: maxStorageMB,
           remaining: remaining,
           tier: req.user.subscriptionTier,
-          upgradeRequired: true
-        }
+          upgradeRequired: true,
+        },
       });
     }
 
     next();
   } catch (err) {
-    console.error('Storage limit check error:', err);
+    console.error("Storage limit check error:", err);
     return res.status(500).json({
       success: false,
       error: {
-        code: 'SERVER_ERROR',
-        message: 'Error checking storage limits'
-      }
+        code: "SERVER_ERROR",
+        message: "Error checking storage limits",
+      },
     });
   }
 };
@@ -592,9 +624,9 @@ const checkTokenLimit = (estimatedTokens = 500) => {
         return res.status(401).json({
           success: false,
           error: {
-            code: 'NOT_AUTHENTICATED',
-            message: 'Authentication required'
-          }
+            code: "NOT_AUTHENTICATED",
+            message: "Authentication required",
+          },
         });
       }
 
@@ -606,44 +638,45 @@ const checkTokenLimit = (estimatedTokens = 500) => {
         return res.status(403).json({
           success: false,
           error: {
-            code: 'TOKEN_REQUEST_LIMIT',
-            message: 'This request exceeds your plan\'s per-request token limit. Try fewer questions or upgrade your plan.',
+            code: "TOKEN_REQUEST_LIMIT",
+            message:
+              "This request exceeds your plan's per-request token limit. Try fewer questions or upgrade your plan.",
             requested: estimatedTokens,
             maxPerRequest: tierLimits.tokensPerRequest,
             tier: req.user.subscriptionTier,
-            upgradeRequired: true
-          }
+            upgradeRequired: true,
+          },
         });
       }
 
       // Check monthly token limit
       if (tierLimits.tokensPerMonth !== -1) {
         const tokensUsed = req.user.usage?.tokensUsedThisMonth || 0;
-        if ((tokensUsed + estimatedTokens) > tierLimits.tokensPerMonth) {
+        if (tokensUsed + estimatedTokens > tierLimits.tokensPerMonth) {
           return res.status(403).json({
             success: false,
             error: {
-              code: 'TOKEN_LIMIT_REACHED',
-              message: 'Monthly AI token limit reached. Upgrade your plan for more usage.',
+              code: "TOKEN_LIMIT_REACHED",
+              message: "Monthly AI token limit reached. Upgrade your plan for more usage.",
               tokensUsed: tokensUsed,
               tokensLimit: tierLimits.tokensPerMonth,
               tier: req.user.subscriptionTier,
               upgradeRequired: true,
-              resetDate: getNextMonthDate()
-            }
+              resetDate: getNextMonthDate(),
+            },
           });
         }
       }
 
       next();
     } catch (err) {
-      console.error('Token limit check error:', err);
+      console.error("Token limit check error:", err);
       return res.status(500).json({
         success: false,
         error: {
-          code: 'SERVER_ERROR',
-          message: 'Error checking token limits'
-        }
+          code: "SERVER_ERROR",
+          message: "Error checking token limits",
+        },
       });
     }
   };
@@ -668,14 +701,15 @@ const trackUpload = (req, res, next) => {
           // Only track storage for actual file uploads
           if (hasFile && req.user.addStorageUsage) {
             const fileArr = Array.isArray(req.files.file) ? req.files.file : [req.files.file];
-            const totalSizeMB = fileArr.reduce((sum, f) => sum + ((f && f.size) ? f.size : 0), 0) / (1024 * 1024);
+            const totalSizeMB =
+              fileArr.reduce((sum, f) => sum + (f && f.size ? f.size : 0), 0) / (1024 * 1024);
             if (totalSizeMB > 0 && !isNaN(totalSizeMB)) {
               await req.user.addStorageUsage(totalSizeMB);
             }
           }
         }
       } catch (err) {
-        console.error('Upload tracking error:', err);
+        console.error("Upload tracking error:", err);
       }
     }
 
@@ -692,15 +726,14 @@ const trackTokenUsage = (req, res, next) => {
   res.json = async function (data) {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       try {
-        const tokensUsed = data?.usage?.total_tokens ||
-          data?.tokensUsed ||
-          estimateTokensFromResponse(data);
+        const tokensUsed =
+          data?.usage?.total_tokens || data?.tokensUsed || estimateTokensFromResponse(data);
 
         if (req.user && tokensUsed > 0 && req.user.addTokenUsage) {
           await req.user.addTokenUsage(tokensUsed);
         }
       } catch (err) {
-        console.error('Token tracking error:', err);
+        console.error("Token tracking error:", err);
       }
     }
 
@@ -714,7 +747,7 @@ const trackTokenUsage = (req, res, next) => {
 function estimateTokensFromResponse(data) {
   if (!data) return 0;
 
-  let content = '';
+  let content = "";
   if (data.content) content = data.content;
   else if (data.data?.content) content = data.data.content;
   else if (data.feedback) content = data.feedback;
@@ -740,5 +773,5 @@ module.exports = {
   checkStorageLimit,
   checkTokenLimit,
   trackUpload,
-  trackTokenUsage
+  trackTokenUsage,
 };

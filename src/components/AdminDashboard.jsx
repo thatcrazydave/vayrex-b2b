@@ -52,16 +52,18 @@ const AdminDashboard = () => {
     return null;
   }
 
+  const isSuperAdmin = user?.role === 'superadmin';
+
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: FiBarChart2 },
     { id: 'users', label: 'Users', icon: FiUsers },
     { id: 'contacts', label: 'Contacts', icon: FiMail },
     { id: 'analytics', label: 'Analytics', icon: FiTrendingUp },
-    { id: 'pricing', label: 'Pricing', icon: FiDollarSign },
+    { id: 'pricing', label: 'Pricing', icon: FiDollarSign, superOnly: true },
     { id: 'system', label: 'System Health', icon: FiActivity },
-    { id: 'backups', label: 'Backups', icon: FiDatabase },
+    { id: 'backups', label: 'Backups', icon: FiDatabase, superOnly: true },
     { id: 'audit', label: 'Audit Logs', icon: FiFileText }
-  ];
+  ].filter(tab => !tab.superOnly || isSuperAdmin);
 
   const renderContent = () => {
     switch (activeTab) {

@@ -44,7 +44,8 @@ contactSchema.index({ email: 1 });
  * Generate unique ticket ID
  * Format: TKT-YYYYMMDD-XXXX (e.g., TKT-20260204-A1B2)
  */
-contactSchema.statics.generateTicketId = async function() {
+contactSchema.statics.generateTicketId = async function(attempt = 0) {
+  if (attempt >= 5) throw new Error('Failed to generate unique ticket ID after 5 attempts');
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
   
@@ -60,7 +61,7 @@ contactSchema.statics.generateTicketId = async function() {
   // Check if ticket ID already exists (very unlikely but handle it)
   const exists = await this.findOne({ ticketId });
   if (exists) {
-    return this.generateTicketId(); // Recursively try again
+    return this.generateTicketId(attempt + 1);
   }
   
   return ticketId;

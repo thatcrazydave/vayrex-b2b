@@ -64,6 +64,12 @@ class EmailService {
 
   _cleanupLog() {
     const hourAgo = Date.now() - 3600000;
+    // SAFETY: Hard cap to prevent unbounded Map growth
+    if (this._emailLog.size > 10000) {
+      Logger.warn('Email log exceeded 10K entries, clearing all', { size: this._emailLog.size });
+      this._emailLog.clear();
+      return;
+    }
     for (const [email, timestamps] of this._emailLog) {
       const recent = timestamps.filter(ts => ts > hourAgo);
       if (recent.length === 0) this._emailLog.delete(email);

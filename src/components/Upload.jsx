@@ -72,6 +72,7 @@ const Upload = () => {
 
   // Sync pending uploads
   const handleSync = async () => {
+    if (syncing) return;
     setSyncing(true);
     setMessage("Syncing offline uploads...");
 
@@ -79,6 +80,7 @@ const Upload = () => {
       await offlineUploadService.syncPendingUploads(api);
     } catch (err) {
       setMessage("Sync failed. Please try again.");
+    } finally {
       setSyncing(false);
     }
   };

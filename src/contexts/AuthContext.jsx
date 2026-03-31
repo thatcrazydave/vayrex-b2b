@@ -526,7 +526,7 @@ export const AuthProvider = ({ children }) => {
         try {
           await signOutUser();
         } catch (firebaseErr) {
-          console.error('Firebase signout skipped:', firebaseErr.messages);
+          console.error('Firebase signout skipped:', firebaseErr.message);
         }
       }
 
@@ -538,6 +538,7 @@ export const AuthProvider = ({ children }) => {
 
     // Clear tab-specific token and user data
     sessionStorage.removeItem('authToken');
+    sessionStorage.removeItem('refreshToken');
     AuthStorage.clear();
     setUser(null);
     setError(null);

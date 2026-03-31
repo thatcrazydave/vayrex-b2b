@@ -325,13 +325,21 @@ userSchema.methods.incrementUploadCount = async function () {
   return this.usage.uploadsThisMonth;
 };
 
-// Add storage usage (atomic operation to prevent race conditions)
+// Add storage usage (atomic check-and-increment to prevent TOCTOU race)
 userSchema.methods.addStorageUsage = async function (fileSizeMB) {
-  const result = await mongoose.model('User').findByIdAndUpdate(
-    this._id,
+  const query = { _id: this._id };
+  // If there's a storage limit, enforce it atomically
+  if (this.limits.maxStorageMB !== -1) {
+    query['usage.storageUsedMB'] = { $lte: this.limits.maxStorageMB - fileSizeMB };
+  }
+  const result = await mongoose.model('User').findOneAndUpdate(
+    query,
     { $inc: { 'usage.storageUsedMB': fileSizeMB } },
     { new: true, select: 'usage.storageUsedMB' }
   );
+  if (!result) {
+    throw new Error('Insufficient storage space');
+  }
   this.usage.storageUsedMB = result.usage.storageUsedMB;
   return this.usage.storageUsedMB;
 };

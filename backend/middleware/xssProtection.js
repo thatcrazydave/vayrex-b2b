@@ -20,8 +20,9 @@ const { sanitize } = require('./sanitizer');
 // ===== XSS ATTACK PATTERNS =====
 // These patterns detect common XSS attack vectors
 const XSS_PATTERNS = [
-  // Script tags and event handlers
-  /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+  // Script tags and event handlers (FIXED: simplified to avoid ReDoS)
+  /<script\b[^>]*>/gi,
+  /<\/script>/gi,
   /javascript:/gi,
   /on\w+\s*=/gi, // onclick=, onload=, onerror=, etc.
   /<iframe/gi,

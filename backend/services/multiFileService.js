@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const path = require('path');
 const AdmZip = require('adm-zip');
 const Logger = require('../logger');
 
@@ -49,8 +50,12 @@ function createBundle(files) {
   const manifest = [];
 
   for (const file of files) {
-    // Sanitize filename to prevent path traversal in ZIP
-    const safeName = file.fileName.replace(/[\/\\]/g, '_').replace(/\.\./g, '_');
+    // SECURITY: Use path.basename to prevent path traversal attacks (e.g. ../../etc/passwd)
+    const safeName = path.basename(file.fileName).replace(/[\x00-\x1f]/g, '_');
+    if (!safeName || safeName === '.' || safeName === '..') {
+      Logger.warn('Skipped file with dangerous name', { originalName: file.fileName });
+      continue;
+    }
     zip.addFile(safeName, file.data, `Original: ${file.fileName}`);
     manifest.push({
       fileName: safeName,

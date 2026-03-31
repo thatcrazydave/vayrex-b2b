@@ -313,6 +313,15 @@ const sanitizeRequestBody = (allowHtmlFields = []) => {
       }
 
       // Sanitize entire body
+      // SECURITY: Block prototype pollution in body keys
+      const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+      for (const dk of dangerousKeys) {
+        if (dk in req.body) {
+          Logger.error('Prototype pollution attempt detected in body', { key: dk, path: req.path, ip: req.ip });
+          delete req.body[dk];
+        }
+      }
+
       req.body = sanitizeObject(req.body, allowHtmlFields, 'body');
 
       Logger.info('Request body sanitized successfully', {
@@ -377,6 +386,12 @@ const sanitizeUrlParams = (req, res, next) => {
     const sanitizedParams = {};
     
     Object.keys(req.params).forEach(key => {
+      // SECURITY: Block prototype pollution attempts
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+        Logger.error('Prototype pollution attempt detected in URL params', { key, path: req.path, ip: req.ip });
+        return; // skip this key
+      }
+
       const value = req.params[key];
       
       if (typeof value === 'string') {

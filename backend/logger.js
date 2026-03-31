@@ -32,7 +32,9 @@ const Logger = {
     console.error(logEntry);
     
     try {
-      fs.appendFileSync(errorLogPath, logEntry + '\n');
+      fs.appendFile(errorLogPath, logEntry + '\n', (err) => {
+        if (err) console.error('Failed to write to error log:', err.message);
+      });
     } catch (err) {
       console.error('Failed to write to error log:', err.message);
     }
@@ -63,7 +65,9 @@ const Logger = {
     }
     
     try {
-      fs.appendFileSync(accessLogPath, logEntry + '\n');
+      fs.appendFile(accessLogPath, logEntry + '\n', (err) => {
+        if (err) console.error('Failed to write to access log:', err.message);
+      });
     } catch (err) {
       console.error('Failed to write to access log:', err.message);
     }

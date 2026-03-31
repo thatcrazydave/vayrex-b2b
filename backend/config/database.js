@@ -77,16 +77,15 @@ function setupEventHandlers() {
           Logger.error('  Reconnection failed', { error: err.message });
           
           if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Logger.error('  Max reconnection attempts reached. Entering degraded mode.');
-            // Enter degraded mode - continue retrying in background instead of exiting
-            reconnectAttempts = Math.floor(MAX_RECONNECT_ATTEMPTS / 2); // Reset to half to continue trying
+            Logger.error('  Max reconnection attempts reached. Server will continue in degraded mode.');
+            // Do NOT reset reconnectAttempts — stop retrying to prevent infinite loop
+            // The app will run in degraded mode until restarted
           }
         }
       }, delay);
     } else {
-      Logger.error('  Max reconnection attempts reached. Entering degraded mode.');
-      // Enter degraded mode - schedule periodic reconnection attempts
-      reconnectAttempts = Math.floor(MAX_RECONNECT_ATTEMPTS / 2);
+      Logger.error('  Max reconnection attempts reached. Server running in degraded mode.');
+      // Do NOT reset — stop further reconnection attempts
     }
   });
 

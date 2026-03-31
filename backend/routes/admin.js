@@ -22,6 +22,14 @@ const Logger = require('../logger');
 const mongoose = require('mongoose');
 const { devNull } = require('os');
 
+// Sanitize pagination params to prevent negative skip or DoS via huge limits
+const sanitizePagination = (rawPage, rawLimit, defaultLimit = 20) => {
+  const page = Math.max(1, parseInt(rawPage) || 1);
+  const limit = Math.min(1000, Math.max(1, parseInt(rawLimit) || defaultLimit));
+  const skip = (page - 1) * limit;
+  return { page, limit, skip };
+};
+
 // Helper to safely check if model exists and has data
 const safeCount = async (Model, filter = {}) => {
   try {
@@ -97,11 +105,10 @@ router.get('/verify-access', async (req, res) => {
 // Get all backups with pagination and stats
 router.get('/backups', async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 20);
 
     const [backups, stats, total] = await Promise.all([
-      backupService.getBackupHistory(parseInt(limit), skip),
+      backupService.getBackupHistory(limit, skip),
       backupService.getBackupStats(),
       BackupHistory.countDocuments()
     ]);
@@ -118,10 +125,10 @@ router.get('/backups', async (req, res) => {
           latest: stats.latest
         },
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
           totalBackups: total,
-          backupsPerPage: parseInt(limit)
+          backupsPerPage: limit
         }
       }
     });
@@ -837,7 +844,7 @@ router.get('/users', async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
     const filter = { isDeleted: { $ne: true } };
 
     if (search) {
@@ -859,7 +866,7 @@ router.get('/users', async (req, res) => {
         .select('-password')
         .sort(sort)
         .skip(skip)
-        .limit(parseInt(limit))
+        .limit(safeLimit)
         .lean(),
       User.countDocuments(filter)
     ]);
@@ -894,10 +901,10 @@ router.get('/users', async (req, res) => {
       data: {
         users: enrichedUsers,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
+          currentPage: safePage,
+          totalPages: Math.ceil(total / safeLimit),
           totalUsers: total,
-          usersPerPage: parseInt(limit)
+          usersPerPage: safeLimit
         }
       }
     });
@@ -1102,17 +1109,19 @@ router.delete('/users/:id', superAdminAuth, auditLogger('user_deleted', 'user'),
   try {
     const { id } = req.params;
 
-    // Delete user and all associated data
-    await Promise.all([
-      User.findByIdAndDelete(id),
-      Question.deleteMany({ userId: id }),
-      Result.deleteMany({ userId: id }),
-      PdfLibrary.deleteMany({ userId: id })
-    ]);
+    // Soft-delete user (consistent with bulk delete)
+    const user = await User.findByIdAndUpdate(
+      id,
+      { isDeleted: true, deletedAt: new Date() },
+      { new: true }
+    );
+    if (!user) {
+      return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+    }
 
     res.json({
       success: true,
-      message: 'User and all associated data deleted successfully'
+      message: 'User soft-deleted successfully'
     });
 
   } catch (err) {
@@ -1139,7 +1148,7 @@ router.get('/contacts', async (req, res) => {
       category = ''
     } = req.query;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
     const filter = {};
 
     if (status) filter.status = status;
@@ -1150,7 +1159,7 @@ router.get('/contacts', async (req, res) => {
       Contact.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit))
+        .limit(safeLimit)
         .populate('resolvedBy', 'username email')
         .lean(),
       Contact.countDocuments(filter),
@@ -1164,10 +1173,10 @@ router.get('/contacts', async (req, res) => {
       data: {
         contacts,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
+          currentPage: safePage,
+          totalPages: Math.ceil(total / safeLimit),
           totalContacts: total,
-          contactsPerPage: parseInt(limit)
+          contactsPerPage: safeLimit
         },
         statusCounts: statusCounts.reduce((acc, item) => {
           acc[item._id] = item.count;
@@ -1407,7 +1416,8 @@ router.get('/system/health', async (req, res) => {
 // ===== SYSTEM ALERTS =====
 router.get('/system/alerts', async (req, res) => {
   try {
-    const { severity = '', status = 'active', limit = 50 } = req.query;
+    const { severity = '', status = 'active', limit: rawLimit = 50 } = req.query;
+    const limit = Math.min(1000, Math.max(1, parseInt(rawLimit) || 50));
 
     const filter = {};
     if (severity) filter.severity = severity;
@@ -1416,7 +1426,7 @@ router.get('/system/alerts', async (req, res) => {
     const [alerts, stats] = await Promise.all([
       SystemAlert.find(filter)
         .sort({ createdAt: -1 })
-        .limit(parseInt(limit))
+        .limit(limit)
         .populate('resolvedBy', 'username email')
         .lean(),
       SystemAlert.aggregate([
@@ -1804,7 +1814,7 @@ router.get('/moderation/flagged', async (req, res) => {
       .populate('flaggedBy', 'username email')
       .populate('moderatedBy', 'username email')
       .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
+      .limit(Math.min(1000, Math.max(1, parseInt(limit) || 50)))
       .lean();
 
     const stats = await FlaggedContent.aggregate([
@@ -1951,14 +1961,13 @@ router.post('/reports/generate', auditLogger('report_generated', 'report'), asyn
 
 router.get('/reports', async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 20);
 
     const [reports, total] = await Promise.all([
       BackupHistory.find({ type: 'report' })
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit))
+        .limit(limit)
         .populate('createdBy', 'username email')
         .lean(),
       BackupHistory.countDocuments({ type: 'report' })
@@ -1969,8 +1978,8 @@ router.get('/reports', async (req, res) => {
       data: {
         reports,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
+          currentPage: page,
+          totalPages: Math.ceil(total / limit),
           total
         }
       }
@@ -2001,7 +2010,7 @@ router.get('/audit-logs', async (req, res) => {
       endDate = ''
     } = req.query;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
     const filter = {};
 
     if (action) filter.action = action;
@@ -2017,7 +2026,7 @@ router.get('/audit-logs', async (req, res) => {
         .populate('userId', 'username email')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit))
+        .limit(safeLimit)
         .lean(),
       AuditLog.countDocuments(filter)
     ]);
@@ -2027,8 +2036,8 @@ router.get('/audit-logs', async (req, res) => {
       data: {
         logs,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
+          currentPage: safePage,
+          totalPages: Math.ceil(total / safeLimit),
           totalLogs: total
         }
       }
@@ -2209,8 +2218,7 @@ router.get('/export/users', auditLogger('users_exported', 'export'), async (req,
 // ===== ACTIVITY LOGS =====
 router.get('/activity-logs', async (req, res) => {
   try {
-    const { page = 1, limit = 50 } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 50);
 
     const [recentUploads, recentExams, recentSignups] = await Promise.all([
       PdfLibrary.find()
@@ -2251,15 +2259,15 @@ router.get('/activity-logs', async (req, res) => {
       }))
     ]
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(skip, skip + parseInt(limit));
+      .slice(skip, skip + limit);
 
     res.json({
       success: true,
       data: {
         activities,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(activities.length / parseInt(limit))
+          currentPage: page,
+          totalPages: Math.ceil(activities.length / limit)
         }
       }
     });
