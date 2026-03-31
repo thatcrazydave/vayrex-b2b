@@ -27,7 +27,7 @@ jobs:
           test -f package-lock.json && echo "package-lock.json present" || echo "package-lock.json missing (proceeding)"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       
       - name: Run ESLint
         run: npm run lint
@@ -67,7 +67,7 @@ jobs:
           cache: 'npm'
       
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       
       - name: Run tests (if available)
         run: npm test
@@ -92,7 +92,7 @@ jobs:
           test -f package-lock.json && echo "package-lock.json present" || echo "package-lock.json missing"
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       
       - name: Build
         run: npm run build
