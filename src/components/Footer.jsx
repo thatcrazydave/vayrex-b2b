@@ -14,16 +14,14 @@ export default function Footer() {
           {/* Brand */}
           <div className="footer-column footer-brand">
             <h3 className="footer-heading">Vayrex</h3>
-            <p className="footer-tagline">AI-powered learning platform. Upload your study materials, generate questions, and ace your exams.</p>
+            <p className="footer-tagline">AI-powered educational management system for schools. Manage classes, grades, attendance, and more.</p>
           </div>
 
           <div className="footer-column">
             <h3 className="footer-heading">Product</h3>
             <ul className="footer-links">
-              <li><Link to="/Dashboard">Dashboard</Link></li>
-              <li><Link to="/Upload">Upload</Link></li>
-              <li><Link to="/generate-quiz">Generate Quiz</Link></li>
-              <li><Link to="/learn">Learn</Link></li>
+              <li><Link to="/for-schools">For Schools</Link></li>
+              <li><Link to="/org-signup">Register School</Link></li>
               <li><Link to="/pricing">Pricing</Link></li>
               <li><Link to="/about">About</Link></li>
             </ul>

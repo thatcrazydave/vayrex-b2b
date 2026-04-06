@@ -71,7 +71,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.625rem 1rem;
-  background: transparent;
+  background: black;
   border: none;
   border-radius: 6px;
   color: var(--text-secondary);
@@ -116,7 +116,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: black;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-secondary);
@@ -147,7 +147,7 @@
   height: 40px;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: black;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -173,7 +173,7 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.875rem 1rem;
-  background: transparent;
+  background: black;
   border: none;
   color: var(--text-secondary);
   font-size: 0.95rem;
@@ -671,7 +671,7 @@
 }
 
 .btn-outline {
-  background: transparent;
+  background: black;
   color: var(--text-primary);
   border-color: var(--border-dark);
 }
@@ -1410,6 +1410,7 @@
 }
 
 @media (max-width: 768px) {
+
   .admin-navbar .container,
   .admin-page-header .container,
   .admin-main-content .container {
@@ -1641,6 +1642,7 @@
 
 /* ===== Touch Device Improvements ===== */
 @media (hover: none) and (pointer: coarse) {
+
   .nav-tab,
   .mobile-nav-item,
   .btn,
@@ -1667,6 +1669,7 @@
 
 /* ===== Print Styles ===== */
 @media print {
+
   .admin-navbar,
   .mobile-menu-btn,
   .navbar-actions,
@@ -1693,12 +1696,14 @@
 }
 
 .system-health {
-  width:100%;
+  width: 100%;
 }
+
 .health-overview {
   margin-bottom: 2rem;
 }
-.health-status-card{
+
+.health-status-card {
   display: flex;
   align-items: center;
   gap: 1.5rem;
@@ -1716,12 +1721,15 @@
   animation: pulse 2s ease-in-out infinite;
 }
 
-@keyframes pulse{
-  0%, 100% {
+@keyframes pulse {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
-  50%{
+
+  50% {
     opacity: 0.7;
     transform: scale(1.1);
   }
@@ -2137,7 +2145,7 @@
     padding: 1rem;
   }
 
-  
+
   .health-status-card {
     padding: 1rem;
   }
@@ -2739,6 +2747,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -2760,6 +2769,7 @@
     transform: translateY(20px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
@@ -2787,7 +2797,7 @@
   height: 36px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
-  background: transparent;
+  background: black;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -3016,6 +3026,7 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -3244,6 +3255,7 @@
 
 /* Touch Device Improvements */
 @media (hover: none) and (pointer: coarse) {
+
   .refresh-btn,
   .create-btn,
   .action-btn,
@@ -3437,6 +3449,7 @@
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -4220,6 +4233,7 @@
 
 /* Touch Device Improvements */
 @media (hover: none) and (pointer: coarse) {
+
   .audit-logs .search-input,
   .audit-logs .filter-select,
   .audit-header .refresh-btn,
@@ -4247,6 +4261,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -4257,6 +4272,7 @@
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -4634,9 +4650,11 @@
   .pm-tier-grid {
     grid-template-columns: 1fr;
   }
+
   .pm-field-row {
     grid-template-columns: 1fr;
   }
+
   .pm-rates-grid {
     grid-template-columns: 1fr 1fr;
   }

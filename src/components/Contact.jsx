@@ -66,7 +66,7 @@ const Contact = () => {
                 </div>
                 <div className="method-content">
                   <h3>Email Support</h3>
-                  <p>support@vayrex.com</p>
+                  <p>support@madebyovo.me</p>
                 </div>
               </div>
 

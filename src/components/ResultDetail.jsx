@@ -54,10 +54,7 @@ const ResultDetail = () => {
         navigate('/login');
       } else if (err.response?.status === 403) {
         showToast.error('You do not have permission to view this result');
-        navigate('/dashboard');
-      } else if (err.response?.status === 404) {
-        showToast.error('Result not found');
-        navigate('/dashboard');
+        navigate('/student');
       } else {
         setError(errorMsg);
         showToast.error(errorMsg);
@@ -92,7 +89,7 @@ const ResultDetail = () => {
     });
   };
 
-  
+
 
   if (loading) {
     return (
@@ -112,8 +109,8 @@ const ResultDetail = () => {
           <FiX className="error-icon" />
           <h2>Error Loading Result</h2>
           <p>{error || 'Result not found'}</p>
-          <button onClick={() => navigate('/dashboard')} className="back-button">
-            <FiArrowLeft /> Back to Dashboard
+          <button onClick={() => navigate(-1)} className="back-button">
+            <FiArrowLeft /> Back
           </button>
         </div>
       </div>
@@ -139,7 +136,7 @@ const ResultDetail = () => {
   return (
     <div className="result-detail-container">
       <div className="result-titlebar">
-        <button onClick={() => navigate('/dashboard')} className="back-icon">
+        <button onClick={() => navigate(-1)} className="back-icon">
           <FiArrowLeft />
         </button>
         <div>

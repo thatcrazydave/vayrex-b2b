@@ -1,5 +1,5 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,26 +8,20 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          firebase: ['firebase/app', 'firebase/auth'],
-          utils: ['axios', 'dompurify', 'react-toastify'],
-          icons: ['react-icons']
-        }
-      }
-    }
+          vendor: ["react", "react-dom", "react-router-dom"],
+          utils: ["axios", "dompurify", "react-toastify"],
+          icons: ["react-icons"],
+        },
+      },
+    },
   },
   server: {
-    headers: {
-      // Allow Firebase popup window close without noisy warnings
-      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
-      'Cross-Origin-Embedder-Policy': 'unsafe-none'
-    },
     proxy: {
-      '/api': {
-        target: 'http://localhost:5001',
+      "/api": {
+        target: "http://localhost:5002",
         changeOrigin: true,
-        secure: false
-      }
-    }
-  }
-})
+        secure: false,
+      },
+    },
+  },
+});

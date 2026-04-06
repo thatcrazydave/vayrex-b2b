@@ -62,11 +62,18 @@ router.post("/signup", validateSignup, async (req, res) => {
         ip: req.ip,
       });
 
+      // If an invite token was supplied, tell the frontend to send the user
+      // to the login page so they can accept the invite while authenticated.
+      const hasInvite = !!(req.body.inviteToken && typeof req.body.inviteToken === "string");
+
       return res.status(409).json({
         success: false,
         error: {
           code: "USER_EXISTS",
-          message: "Account already registered",
+          message: hasInvite
+            ? "You already have an account. Please log in to accept the invitation."
+            : "Account already registered",
+          ...(hasInvite && { hint: "LOGIN_TO_ACCEPT_INVITE" }),
         },
       });
     }
@@ -74,13 +81,14 @@ router.post("/signup", validateSignup, async (req, res) => {
     const user = new User({
       username: username.toLowerCase(),
       email: email.toLowerCase(),
-      password, // Pass plain password, let User model schema handle hashing
+      password,
       fullname,
       role: "user",
-      subscriptionTier: "free",
-      subscriptionStatus: "active",
-      subscriptionStartDate: new Date(),
-      emailVerified: false, // Set to false initially
+      emailVerified: false,
+      // Self-signup without an invite token goes into pending review.
+      // The account becomes active only when org admin or Vayrex staff approves it.
+      // If an inviteToken is provided below, this is overridden to 'active'.
+      accountStatus: "pending_approval",
     });
 
     // Generate email verification token AND 6-digit code
@@ -97,11 +105,90 @@ router.post("/signup", validateSignup, async (req, res) => {
 
     await user.save();
 
+    // B2B: If inviteToken is provided, accept the invitation and link user to org
+    const { inviteToken } = req.body;
+    if (inviteToken && typeof inviteToken === "string" && inviteToken.length <= 256) {
+      try {
+        const Invitation = require("../models/Invitation");
+        const Organization = require("../models/Organization");
+
+        const invite = await Invitation.findByToken(inviteToken);
+        if (
+          invite &&
+          invite.email === user.email.toLowerCase() &&
+          invite.status === "pending"
+        ) {
+          const org = await Organization.findById(invite.orgId)
+            .select("_id enrollmentCount enrollmentCapacity")
+            .lean();
+          if (org) {
+            // Link user to org and set account active — invite is authorisation
+            user.organizationId = invite.orgId;
+            user.orgRole = invite.orgRole;
+            user.seatAssignedAt = new Date();
+            user.accountStatus = "active"; // invite acceptance clears pending state
+            if (invite.classId) user.classId = invite.classId;
+
+            // Guardian: link to child student(s) via guardianCode
+            if (invite.orgRole === "guardian" && invite.guardianCode) {
+              // guardianCode is the student's userId or a code that maps to student(s)
+              const studentUser = await User.findOne({
+                _id: invite.guardianCode,
+                organizationId: invite.orgId,
+                orgRole: "student",
+              }).lean();
+              if (studentUser) {
+                user.guardianOf = [studentUser._id];
+              }
+            }
+
+            await user.save();
+
+            // Mark invite accepted
+            invite.status = "accepted";
+            invite.acceptedAt = new Date();
+            await invite.save();
+
+            // Increment enrollment count
+            await Organization.findByIdAndUpdate(invite.orgId, {
+              $inc: { enrollmentCount: 1 },
+            });
+
+            Logger.info("Invitation accepted at signup", {
+              userId: user._id,
+              orgId: invite.orgId,
+              role: invite.orgRole,
+            });
+          }
+        }
+      } catch (inviteErr) {
+        // Non-fatal: log and continue — user account was created successfully
+        Logger.error("Failed to process invite token at signup (non-fatal)", {
+          error: inviteErr.message,
+          userId: user._id,
+        });
+      }
+    }
+
     Logger.info("New user registered", {
       userId: user._id,
       email: user.email,
-      tier: user.subscriptionTier,
+      orgRole: user.orgRole || null,
+      accountStatus: user.accountStatus,
     });
+
+    // If the account is still pending_approval (no invite), do not issue tokens.
+    // The user must wait for approval before they can authenticate.
+    if (user.accountStatus === "pending_approval") {
+      return res.status(201).json({
+        success: true,
+        data: null,
+        pending: true,
+        message:
+          "Registration received. Your account is pending review. You will be notified by email once it is approved.",
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // Send verification email asynchronously (NOT awaited to prevent timeout)
     emailService
@@ -128,9 +215,10 @@ router.post("/signup", validateSignup, async (req, res) => {
           email: user.email,
           fullname: user.fullname,
           role: user.role,
-          subscriptionTier: user.subscriptionTier,
-          subscriptionStatus: user.subscriptionStatus,
-          subscriptionExpiry: user.subscriptionExpiry,
+          organizationId: user.organizationId,
+          orgRole: user.orgRole,
+          classId: user.classId,
+          guardianOf: user.guardianOf || [],
           limits: user.limits,
           usage: user.usage,
         },
@@ -138,7 +226,7 @@ router.post("/signup", validateSignup, async (req, res) => {
         refreshExpiresIn: 7 * 24 * 60 * 60,
         tabIsolated: true, // Pure tab isolation - no shared state
       },
-      message: "Signup successful - Welcome to the FREE tier!",
+      message: "Account created successfully",
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -203,11 +291,51 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
       });
     }
 
-    // Check subscription expiry
-    if (user.isSubscriptionExpired() && user.subscriptionTier !== "free") {
+    // Check subscription expiry — only applies to non-org accounts
+    if (
+      !user.organizationId &&
+      user.isSubscriptionExpired() &&
+      user.subscriptionTier !== "free"
+    ) {
       user.subscriptionTier = "free";
       user.subscriptionStatus = "expired";
       await user.save();
+    }
+
+    // Block accounts that are pending admin approval
+    if (user.accountStatus === "pending_approval") {
+      Logger.warn("Login attempt on pending account", {
+        userId: user._id,
+        email: user.email,
+        ip: req.ip,
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_PENDING_APPROVAL",
+          message:
+            "Your account is pending review. You will receive an email once it has been approved.",
+        },
+      });
+    }
+
+    // Block suspended accounts
+    if (user.accountStatus === "suspended") {
+      Logger.warn("Login attempt on suspended account", {
+        userId: user._id,
+        email: user.email,
+        ip: req.ip,
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_SUSPENDED",
+          message:
+            "Your account has been suspended. Please contact your organisation administrator.",
+        },
+      });
     }
 
     // Check if account is inactive
@@ -264,7 +392,7 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
       userId: user._id,
       email: user.email,
       ip: req.ip,
-      tier: user.subscriptionTier,
+      orgRole: user.orgRole || null,
     });
 
     // PURE TAB ISOLATION: Long-lived token (7 days) in sessionStorage only
@@ -282,9 +410,10 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
       emailVerified: user.emailVerified || false,
       createdAt: user.createdAt,
       lastLogin: user.lastLogin,
-      subscriptionTier: user.subscriptionTier,
-      subscriptionStatus: user.subscriptionStatus,
-      subscriptionExpiry: user.subscriptionExpiry,
+      organizationId: user.organizationId,
+      orgRole: user.orgRole,
+      classId: user.classId,
+      guardianOf: user.guardianOf || [],
       limits: user.limits,
       usage: user.usage,
     };
@@ -318,153 +447,6 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
       },
       data: null,
       timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-// ===== Firebase/Google OAuth Login =====
-// SECURITY: Requires Firebase ID token (NOT raw UID) to prevent auth bypass
-router.post("/firebase-login", async (req, res) => {
-  try {
-    const { firebaseToken, idToken } = req.body;
-    const token = firebaseToken || idToken;
-
-    if (!token || typeof token !== "string") {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "MISSING_TOKEN",
-          message: "Firebase ID token is required",
-        },
-      });
-    }
-
-    // CRITICAL: Verify the Firebase ID token with Admin SDK
-    const admin = require("firebase-admin");
-    let decodedToken;
-    try {
-      decodedToken = await admin.auth().verifyIdToken(token, true);
-    } catch (verifyErr) {
-      Logger.warn("Firebase token verification failed", { error: verifyErr.message });
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: "INVALID_TOKEN",
-          message: "Invalid or expired Firebase token",
-        },
-      });
-    }
-
-    const { uid: firebaseUid, email, name: fullname, picture: photoURL } = decodedToken;
-
-    if (!firebaseUid || !email) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "INCOMPLETE_TOKEN",
-          message: "Token missing required claims (uid, email)",
-        },
-      });
-    }
-
-    // Find or create user
-    let user = await User.findOne({ firebaseUid });
-
-    if (!user) {
-      user = await User.findOne({ email: email.toLowerCase() });
-
-      if (user && !user.firebaseUid) {
-        user.firebaseUid = firebaseUid;
-        user.provider = "google";
-        user.photoURL = photoURL;
-        user.emailVerified = true;
-        await user.save();
-      }
-    }
-
-    if (!user) {
-      // Create new user with FREE tier
-      user = new User({
-        firebaseUid,
-        email: email.toLowerCase(),
-        fullname: fullname || email.split("@")[0],
-        username: email.split("@")[0].toLowerCase() + "_" + Date.now(), // Ensure unique
-        provider: "google",
-        photoURL,
-        role: "user",
-        emailVerified: true,
-        subscriptionTier: "free",
-        subscriptionStatus: "active",
-        subscriptionStartDate: new Date(),
-      });
-
-      await user.save();
-
-      Logger.info("New Google OAuth user created", {
-        userId: user._id,
-        email: user.email,
-      });
-    }
-
-    // Check subscription expiry
-    if (user.isSubscriptionExpired() && user.subscriptionTier !== "free") {
-      user.subscriptionTier = "free";
-      user.subscriptionStatus = "expired";
-      await user.save();
-    }
-
-    // Update last login
-    user.lastLogin = new Date();
-    await user.save();
-
-    Logger.info("Google OAuth login", {
-      userId: user._id,
-      email: user.email,
-    });
-
-    // Pure tab isolation: 7-day token in sessionStorage
-    const accessToken = TokenService.generateAccessToken(user, "15m");
-    const refreshToken = TokenService.generateRefreshToken(user);
-
-    res.json({
-      success: true,
-      data: {
-        accessToken,
-        refreshToken,
-        user: {
-          id: user._id,
-          username: user.username,
-          email: user.email,
-          fullname: user.fullname,
-          role: user.role,
-          photoURL: user.photoURL,
-          provider: user.provider,
-          emailVerified: user.emailVerified,
-          subscriptionTier: user.subscriptionTier,
-          subscriptionStatus: user.subscriptionStatus,
-          subscriptionExpiry: user.subscriptionExpiry,
-          limits: user.limits,
-          usage: user.usage,
-        },
-        isAdmin: user.role === "admin" || user.role === "superadmin",
-        isSuperAdmin: user.role === "superadmin",
-        expiresIn: 15 * 60,
-        refreshExpiresIn: 7 * 24 * 60 * 60,
-        tabIsolated: true,
-      },
-    });
-  } catch (error) {
-    Logger.error("Google auth error", {
-      error: error.message,
-      stack: error.stack,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: {
-        code: "SERVER_ERROR",
-        message: "Server error during Google authentication",
-      },
     });
   }
 });
@@ -504,6 +486,19 @@ router.post("/refresh", async (req, res) => {
         error: {
           code: "USER_NOT_FOUND",
           message: "User not found or inactive",
+        },
+      });
+    }
+
+    // B2B: Block suspended accounts on token refresh
+    if (user.accountStatus === "suspended") {
+      await TokenService.revokeToken(decoded.jti, 0);
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_SUSPENDED",
+          message:
+            "Your account has been suspended. Please contact your organisation administrator.",
         },
       });
     }
@@ -549,9 +544,9 @@ router.post("/refresh", async (req, res) => {
           photoURL: user.photoURL,
           provider: user.provider || "email",
           emailVerified: user.emailVerified || false,
-          subscriptionTier: user.subscriptionTier,
-          subscriptionStatus: user.subscriptionStatus,
-          subscriptionExpiry: user.subscriptionExpiry,
+          organizationId: user.organizationId,
+          orgRole: user.orgRole,
+          classId: user.classId,
           limits: user.limits,
           usage: user.usage,
           isAdmin: user.role === "admin" || user.role === "superadmin",
@@ -741,71 +736,76 @@ router.post("/verify-email-code", async (req, res) => {
 const resendVerificationLimiter = createEndpointLimiter(
   3,
   15 * 60 * 1000,
-  'Too many verification emails sent. Please wait 15 minutes before trying again.'
+  "Too many verification emails sent. Please wait 15 minutes before trying again.",
 );
 
-router.post("/resend-verification", authenticateToken, resendVerificationLimiter, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
+router.post(
+  "/resend-verification",
+  authenticateToken,
+  resendVerificationLimiter,
+  async (req, res) => {
+    try {
+      const user = await User.findById(req.user.id);
 
-    if (!user) {
-      return res.status(404).json({
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "USER_NOT_FOUND",
+            message: "User not found",
+          },
+        });
+      }
+
+      if (user.emailVerified) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "ALREADY_VERIFIED",
+            message: "Email is already verified",
+          },
+        });
+      }
+
+      // Generate new verification token AND code
+      const verificationToken = crypto.randomBytes(32).toString("hex");
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+      user.emailVerificationToken = crypto
+        .createHash("sha256")
+        .update(verificationToken)
+        .digest("hex");
+      user.emailVerificationCode = verificationCode;
+      user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+      user.emailVerificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+      await user.save();
+
+      // Send verification email with both token and code
+      await emailService.sendVerificationEmail(
+        user.email,
+        user.username,
+        verificationToken,
+        verificationCode,
+      );
+
+      Logger.info("Verification email resent", { userId: user._id });
+
+      res.json({
+        success: true,
+        message: "Verification email sent! Please check your inbox.",
+      });
+    } catch (error) {
+      Logger.error("Resend verification error", { error: error.message });
+      res.status(500).json({
         success: false,
         error: {
-          code: "USER_NOT_FOUND",
-          message: "User not found",
+          code: "SERVER_ERROR",
+          message: "Error sending verification email",
         },
       });
     }
-
-    if (user.emailVerified) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "ALREADY_VERIFIED",
-          message: "Email is already verified",
-        },
-      });
-    }
-
-    // Generate new verification token AND code
-    const verificationToken = crypto.randomBytes(32).toString("hex");
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    user.emailVerificationToken = crypto
-      .createHash("sha256")
-      .update(verificationToken)
-      .digest("hex");
-    user.emailVerificationCode = verificationCode;
-    user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    user.emailVerificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    await user.save();
-
-    // Send verification email with both token and code
-    await emailService.sendVerificationEmail(
-      user.email,
-      user.username,
-      verificationToken,
-      verificationCode,
-    );
-
-    Logger.info("Verification email resent", { userId: user._id });
-
-    res.json({
-      success: true,
-      message: "Verification email sent! Please check your inbox.",
-    });
-  } catch (error) {
-    Logger.error("Resend verification error", { error: error.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: "SERVER_ERROR",
-        message: "Error sending verification email",
-      },
-    });
-  }
-});
+  },
+);
 
 // ===== Forgot Password =====
 router.post("/forgot-password", async (req, res) => {
@@ -1014,6 +1014,220 @@ router.post("/reset-password-code", async (req, res) => {
         code: "SERVER_ERROR",
         message: "Error resetting password",
       },
+    });
+  }
+});
+
+// ===== B2B: Accept Invitation =====
+// GET /api/auth/accept-invite/:token — validates token, returns invite metadata for the signup form
+router.get("/accept-invite/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    if (!token || typeof token !== "string" || token.length > 256) {
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_TOKEN", message: "Invalid invitation token" },
+      });
+    }
+
+    const Invitation = require("../models/Invitation");
+    const Organization = require("../models/Organization");
+
+    const invite = await Invitation.findByToken(token);
+    if (!invite) {
+      return res.status(404).json({
+        success: false,
+        error: { code: "INVITE_NOT_FOUND", message: "Invitation not found or has expired" },
+      });
+    }
+
+    const org = await Organization.findById(invite.orgId)
+      .select("name slug subdomain plan")
+      .lean();
+
+    return res.json({
+      success: true,
+      invite: {
+        id: invite._id,
+        email: invite.email,
+        orgRole: invite.orgRole,
+        orgId: invite.orgId,
+        classId: invite.classId,
+        guardianCode: invite.guardianCode,
+        expiresAt: invite.expiresAt,
+      },
+      org: org || null,
+    });
+  } catch (err) {
+    Logger.error("accept-invite GET error", { error: err.message });
+    return res.status(500).json({
+      success: false,
+      error: { code: "SERVER_ERROR", message: "Failed to validate invitation" },
+    });
+  }
+});
+
+// ===== B2B: Accept Invitation (Existing User) =====
+// POST /api/auth/accept-invite — for users who already have an account
+router.post("/accept-invite", authenticateToken, async (req, res) => {
+  try {
+    const { inviteToken } = req.body;
+    if (!inviteToken || typeof inviteToken !== "string" || inviteToken.length > 256) {
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_TOKEN", message: "Invitation token is required" },
+      });
+    }
+
+    const Invitation = require("../models/Invitation");
+    const Organization = require("../models/Organization");
+
+    const invite = await Invitation.findByToken(inviteToken);
+    if (!invite || invite.status !== "pending") {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: "INVITE_NOT_FOUND",
+          message: "Invitation not found, expired, or already used",
+        },
+      });
+    }
+
+    // Email must match
+    if (invite.email !== req.user.email.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "EMAIL_MISMATCH",
+          message: "This invitation was sent to a different email address",
+        },
+      });
+    }
+
+    // User must not already belong to a different org
+    if (
+      req.user.organizationId &&
+      req.user.organizationId.toString() !== invite.orgId.toString()
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: "ALREADY_IN_ORG",
+          message: "You already belong to a different organisation",
+        },
+      });
+    }
+
+    // Already in this org? Just return success
+    if (
+      req.user.organizationId &&
+      req.user.organizationId.toString() === invite.orgId.toString()
+    ) {
+      invite.status = "accepted";
+      invite.acceptedAt = new Date();
+      await invite.save();
+      return res.json({
+        success: true,
+        message: "You are already a member of this organisation",
+        user: {
+          id: req.user._id,
+          organizationId: req.user.organizationId,
+          orgRole: req.user.orgRole,
+        },
+      });
+    }
+
+    const org = await Organization.findById(invite.orgId)
+      .select("_id enrollmentCount enrollmentCapacity")
+      .lean();
+
+    if (!org) {
+      return res.status(404).json({
+        success: false,
+        error: { code: "ORG_NOT_FOUND", message: "Organisation no longer exists" },
+      });
+    }
+
+    // Check capacity
+    if (org.enrollmentCount >= org.enrollmentCapacity) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: "ORG_FULL",
+          message: "Organisation has reached its maximum seat capacity",
+        },
+      });
+    }
+
+    // Link user to org
+    const user = await User.findById(req.user._id);
+    user.organizationId = invite.orgId;
+    user.orgRole = invite.orgRole;
+    user.seatAssignedAt = new Date();
+    user.accountStatus = "active";
+    if (invite.classId) user.classId = invite.classId;
+
+    // Guardian linking
+    if (invite.orgRole === "guardian" && invite.guardianCode) {
+      const studentUser = await User.findOne({
+        _id: invite.guardianCode,
+        organizationId: invite.orgId,
+        orgRole: "student",
+      }).lean();
+      if (studentUser) {
+        user.guardianOf = [studentUser._id];
+      }
+    }
+
+    // Increment token version to force re-auth with new org claims
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    // Mark invite accepted
+    invite.status = "accepted";
+    invite.acceptedAt = new Date();
+    await invite.save();
+
+    // Increment org enrollment
+    await Organization.findByIdAndUpdate(invite.orgId, { $inc: { enrollmentCount: 1 } });
+
+    // Issue new tokens with updated claims
+    const accessToken = TokenService.generateAccessToken(user, "15m");
+    const refreshToken = TokenService.generateRefreshToken(user);
+
+    Logger.info("Existing user accepted invitation", {
+      userId: user._id,
+      orgId: invite.orgId,
+      orgRole: invite.orgRole,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          fullname: user.fullname,
+          role: user.role,
+          organizationId: user.organizationId,
+          orgRole: user.orgRole,
+          classId: user.classId,
+          limits: user.limits,
+          usage: user.usage,
+        },
+        expiresIn: 15 * 60,
+        refreshExpiresIn: 7 * 24 * 60 * 60,
+      },
+      message: "Invitation accepted successfully",
+    });
+  } catch (err) {
+    Logger.error("POST accept-invite error", { error: err.message });
+    return res.status(500).json({
+      success: false,
+      error: { code: "SERVER_ERROR", message: "Failed to accept invitation" },
     });
   }
 });

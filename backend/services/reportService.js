@@ -1,20 +1,20 @@
-const User = require('../models/user');
-const Question = require('../models/questions');
-const Result = require('../models/result');
-const PdfLibrary = require('../models/PdfLibrary');
-const Contact = require('../models/contact');
-const SystemAlert = require('../models/SystemAlert');
-const ApiUsage = require('../models/ApiUsage');
-const emailService = require('./emailService');
-const Logger = require('../logger');
-const BackupHistory = require('../models/BackupHistory');
-const FlaggedContent = require('../models/FlaggedContent');
+const User = require("../models/user");
+const Question = require("../models/questions");
+const Result = require("../models/result");
+const PdfLibrary = require("../models/PdfLibrary");
+const Contact = require("../models/contact");
+const SystemAlert = require("../models/SystemAlert");
+const ApiUsage = require("../models/ApiUsage");
+const emailService = require("./emailService");
+const Logger = require("../logger");
+const BackupHistory = require("../models/BackupHistory");
+const FlaggedContent = require("../models/FlaggedContent");
 
 class ReportService {
   async generateWeeklyReport() {
     try {
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      
+
       const [
         newUsers,
         totalUploads,
@@ -26,56 +26,52 @@ class ReportService {
         storageData,
         activeUsers,
         apiCalls,
-        avgResponseTimeData
+        avgResponseTimeData,
       ] = await Promise.all([
         User.countDocuments({ createdAt: { $gte: oneWeekAgo } }),
         PdfLibrary.countDocuments({ uploadedAt: { $gte: oneWeekAgo } }),
         Result.countDocuments({ createdAt: { $gte: oneWeekAgo } }),
         Result.aggregate([
           { $match: { createdAt: { $gte: oneWeekAgo } } },
-          { $group: { _id: null, avg: { $avg: '$percentage' } } }
+          { $group: { _id: null, avg: { $avg: "$percentage" } } },
         ]),
         Question.aggregate([
-          { $group: { _id: '$topic', questions: { $sum: 1 } } },
+          { $group: { _id: "$topic", questions: { $sum: 1 } } },
           {
             $lookup: {
-              from: 'results',
-              let: { topic: '$_id' },
-              pipeline: [
-                { $match: { $expr: { $eq: ['$topic', '$$topic'] } } }
-              ],
-              as: 'exams'
-            }
+              from: "results",
+              let: { topic: "$_id" },
+              pipeline: [{ $match: { $expr: { $eq: ["$topic", "$$topic"] } } }],
+              as: "exams",
+            },
           },
           {
             $project: {
-              name: '$_id',
+              name: "$_id",
               questions: 1,
-              exams: { $size: '$exams' }
-            }
+              exams: { $size: "$exams" },
+            },
           },
           { $sort: { questions: -1 } },
-          { $limit: 5 }
+          { $limit: 5 },
         ]),
         SystemAlert.countDocuments({ createdAt: { $gte: oneWeekAgo } }),
-        SystemAlert.countDocuments({ 
+        SystemAlert.countDocuments({
           createdAt: { $gte: oneWeekAgo },
-          severity: 'critical'
+          severity: "critical",
         }),
-        PdfLibrary.aggregate([
-          { $group: { _id: null, total: { $sum: '$fileSize' } } }
-        ]),
-        User.countDocuments({ 
+        PdfLibrary.aggregate([{ $group: { _id: null, total: { $sum: "$fileSize" } } }]),
+        User.countDocuments({
           lastLogin: { $gte: oneWeekAgo },
-          isActive: true
+          isActive: true,
         }),
         ApiUsage.countDocuments({ timestamp: { $gte: oneWeekAgo } }),
         ApiUsage.aggregate([
           { $match: { timestamp: { $gte: oneWeekAgo } } },
-          { $group: { _id: null, avg: { $avg: '$responseTime' } } }
-        ])
+          { $group: { _id: null, avg: { $avg: "$responseTime" } } },
+        ]),
       ]);
-      
+
       const reportData = {
         newUsers,
         totalUploads,
@@ -88,7 +84,7 @@ class ReportService {
         storageTotal: 50, // Your limit
         activeUsers,
         apiCalls,
-        avgResponseTime: Math.round(avgResponseTimeData[0]?.avg || 0)
+        avgResponseTime: Math.round(avgResponseTimeData[0]?.avg || 0),
       };
 
       const report = {
@@ -104,25 +100,24 @@ class ReportService {
         storageTotal: 100, // Configure this
         apiCalls,
         avgResponseTime: avgResponseTimeData[0]?.avg || 0,
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
       };
 
       // Send to all admins who opted in
       const admins = await User.find({
-        role: { $in: ['admin', 'superadmin'] },
-        'preferences.weeklyReports': true
-      }).select('email');
-      
+        role: { $in: ["admin", "superadmin"] },
+        "preferences.weeklyReports": true,
+      }).select("email");
+
       for (const admin of admins) {
         await emailService.sendWeeklyReport(admin.email, reportData);
       }
-      
-      Logger.info('Weekly reports sent', { recipientCount: admins.length });
-      
+
+      Logger.info("Weekly reports sent", { recipientCount: admins.length });
+
       return reportData;
-      
     } catch (err) {
-      Logger.error('Weekly report generation error', { error: err.message });
+      Logger.error("Weekly report generation error", { error: err.message });
       throw err;
     }
   }
@@ -131,71 +126,64 @@ class ReportService {
     try {
       const startDate = new Date(Date.now() - parseInt(period) * 24 * 60 * 60 * 1000);
       let reportData = {
-        title: `${type.replace('_', ' ').toUpperCase()} Report`,
+        title: `${type.replace("_", " ").toUpperCase()} Report`,
         period: `${period} days`,
         generatedAt: new Date().toISOString(),
-        generatedBy
+        generatedBy,
       };
 
       switch (type) {
-        case 'user_activity':
+        case "user_activity":
           reportData.data = await this.generateUserActivityReport(startDate);
           break;
 
-        case 'system_performance':
+        case "system_performance":
           reportData.data = await this.generateSystemPerformanceReport(startDate);
           break;
 
-        case 'content_summary':
+        case "content_summary":
           reportData.data = await this.generateContentSummaryReport(startDate);
           break;
 
-        case 'financial':
+        case "financial":
           reportData.data = await this.generateFinancialReport(startDate);
           break;
 
         default:
-          throw new Error('Invalid report type');
+          throw new Error("Invalid report type");
       }
 
-      // Save to S3 and BackupHistory
-      const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-      const s3Client = new S3Client({
-        region: process.env.AWS_REGION || 'us-east-1',
-        credentials: {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-        }
-      });
+      // Save to Supabase storage and BackupHistory
+      const storageService = require("./storageService");
 
       const reportJson = JSON.stringify(reportData, null, 2);
       const reportKey = `reports/${type}_${Date.now()}.json`;
 
-      await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Key: reportKey,
-        Body: reportJson,
-        ContentType: 'application/json'
-      }));
+      await storageService.upload(
+        Buffer.from(reportJson),
+        reportKey,
+        "application/json",
+        null,
+        generatedBy,
+      );
 
       const reportHistory = await BackupHistory.create({
-        type: 'report',
+        type: "report",
         s3Key: reportKey,
         size: Buffer.byteLength(reportJson),
         createdBy: generatedBy,
         metadata: { reportType: type, period },
-        status: 'completed'
+        status: "completed",
       });
 
-      Logger.info('Report generated successfully', {
+      Logger.info("Report generated successfully", {
         reportId: reportHistory._id,
-        type
+        type,
       });
 
       return reportData;
-
     } catch (err) {
-      Logger.error('Report generation failed', { error: err.message });
+      Logger.error("Report generation failed", { error: err.message });
       throw err;
     }
   }
@@ -203,58 +191,58 @@ class ReportService {
   async generateUserActivityReport(startDate) {
     const [newUsers, activeUsers, topUsers, userGrowth] = await Promise.all([
       User.countDocuments({ createdAt: { $gte: startDate } }),
-      User.countDocuments({ 
+      User.countDocuments({
         lastLogin: { $gte: startDate },
-        isActive: true 
+        isActive: true,
       }),
       Result.aggregate([
         { $match: { createdAt: { $gte: startDate } } },
-        { 
-          $group: { 
-            _id: '$userId', 
+        {
+          $group: {
+            _id: "$userId",
             examCount: { $sum: 1 },
-            avgScore: { $avg: '$percentage' }
-          } 
+            avgScore: { $avg: "$percentage" },
+          },
         },
         { $sort: { examCount: -1 } },
         { $limit: 10 },
         {
           $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'user'
-          }
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "user",
+          },
         },
-        { $unwind: '$user' },
+        { $unwind: "$user" },
         {
           $project: {
-            username: '$user.username',
-            email: '$user.email',
+            username: "$user.username",
+            email: "$user.email",
             examCount: 1,
-            avgScore: 1
-          }
-        }
+            avgScore: 1,
+          },
+        },
       ]),
       User.aggregate([
         { $match: { createdAt: { $gte: startDate } } },
         {
           $group: {
             _id: {
-              $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+              $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
             },
-            count: { $sum: 1 }
-          }
+            count: { $sum: 1 },
+          },
         },
-        { $sort: { _id: 1 } }
-      ])
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
-    return { 
-      newUsers, 
-      activeUsers, 
+    return {
+      newUsers,
+      activeUsers,
       topUsers,
-      userGrowth
+      userGrowth,
     };
   }
 
@@ -262,7 +250,7 @@ class ReportService {
     const [avgResponseTime, errorRate, totalRequests, endpointStats] = await Promise.all([
       ApiUsage.aggregate([
         { $match: { timestamp: { $gte: startDate } } },
-        { $group: { _id: null, avg: { $avg: '$responseTime' } } }
+        { $group: { _id: null, avg: { $avg: "$responseTime" } } },
       ]),
       ApiUsage.aggregate([
         { $match: { timestamp: { $gte: startDate } } },
@@ -270,30 +258,30 @@ class ReportService {
           $group: {
             _id: null,
             total: { $sum: 1 },
-            errors: { $sum: { $cond: [{ $gte: ['$statusCode', 400] }, 1, 0] } }
-          }
-        }
+            errors: { $sum: { $cond: [{ $gte: ["$statusCode", 400] }, 1, 0] } },
+          },
+        },
       ]),
       ApiUsage.countDocuments({ timestamp: { $gte: startDate } }),
       ApiUsage.aggregate([
         { $match: { timestamp: { $gte: startDate } } },
         {
           $group: {
-            _id: '$endpoint',
+            _id: "$endpoint",
             requests: { $sum: 1 },
-            avgResponseTime: { $avg: '$responseTime' }
-          }
+            avgResponseTime: { $avg: "$responseTime" },
+          },
         },
         { $sort: { requests: -1 } },
-        { $limit: 10 }
-      ])
+        { $limit: 10 },
+      ]),
     ]);
 
     return {
       avgResponseTime: avgResponseTime[0]?.avg || 0,
       errorRate: errorRate[0] ? (errorRate[0].errors / errorRate[0].total) * 100 : 0,
       totalRequests,
-      topEndpoints: endpointStats
+      topEndpoints: endpointStats,
     };
   }
 
@@ -303,42 +291,42 @@ class ReportService {
         { $match: { createdAt: { $gte: startDate } } },
         {
           $group: {
-            _id: '$topic',
+            _id: "$topic",
             questionCount: { $sum: 1 },
-            avgQuality: { $avg: '$qualityScore' },
-            uniqueUsers: { $addToSet: '$userId' }
-          }
+            avgQuality: { $avg: "$qualityScore" },
+            uniqueUsers: { $addToSet: "$userId" },
+          },
         },
         {
           $project: {
-            topic: '$_id',
+            topic: "$_id",
             questionCount: 1,
             avgQuality: 1,
-            userCount: { $size: '$uniqueUsers' }
-          }
+            userCount: { $size: "$uniqueUsers" },
+          },
         },
-        { $sort: { questionCount: -1 } }
+        { $sort: { questionCount: -1 } },
       ]),
       Question.countDocuments({ createdAt: { $gte: startDate } }),
-      FlaggedContent.countDocuments({ 
+      FlaggedContent.countDocuments({
         createdAt: { $gte: startDate },
-        status: 'pending'
-      })
+        status: "pending",
+      }),
     ]);
 
     return {
       topicStats,
       totalQuestions,
-      flaggedContent
+      flaggedContent,
     };
   }
 
   async generateFinancialReport(startDate) {
     // Placeholder - implement based on your business model
     const totalUsers = await User.countDocuments({ createdAt: { $gte: startDate } });
-    const activeUsers = await User.countDocuments({ 
+    const activeUsers = await User.countDocuments({
       lastLogin: { $gte: startDate },
-      isActive: true 
+      isActive: true,
     });
 
     return {
@@ -346,7 +334,7 @@ class ReportService {
       newSubscriptions: totalUsers,
       activeSubscriptions: activeUsers,
       churnRate: 0,
-      averageRevenuePerUser: 0
+      averageRevenuePerUser: 0,
     };
   }
 
@@ -354,10 +342,10 @@ class ReportService {
     // This would be called by a cron job
     try {
       const report = await this.generateWeeklyReport();
-      Logger.info('Scheduled weekly report completed', { report });
+      Logger.info("Scheduled weekly report completed", { report });
       return report;
     } catch (err) {
-      Logger.error('Scheduled report failed', { error: err.message });
+      Logger.error("Scheduled report failed", { error: err.message });
       throw err;
     }
   }
@@ -371,26 +359,27 @@ function scheduleWeeklyReports() {
   const nextSunday = new Date();
   nextSunday.setDate(now.getDate() + (7 - now.getDay()));
   nextSunday.setHours(9, 0, 0, 0);
-  
+
   if (nextSunday <= now) {
     nextSunday.setDate(nextSunday.getDate() + 7);
   }
-  
+
   const timeUntilReport = nextSunday - now;
-  
+
   setTimeout(() => {
-    reportService.generateWeeklyReport()
+    reportService
+      .generateWeeklyReport()
       .then(() => {
-        Logger.info('Weekly report generated and sent');
+        Logger.info("Weekly report generated and sent");
         scheduleWeeklyReports(); // Schedule next report
       })
-      .catch(err => {
-        Logger.error('Weekly report error', { error: err.message });
+      .catch((err) => {
+        Logger.error("Weekly report error", { error: err.message });
       });
   }, timeUntilReport);
-  
-  Logger.info('Next weekly report scheduled', { 
-    scheduledTime: nextSunday.toISOString() 
+
+  Logger.info("Next weekly report scheduled", {
+    scheduledTime: nextSunday.toISOString(),
   });
 }
 

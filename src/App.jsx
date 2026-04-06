@@ -3,113 +3,222 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'r
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider } from './contexts/AuthContext.jsx';
-import ProtectedRoute from './components/ProtectedRoute.jsx';
-import AdminRoute from './components/AdminRoute.jsx';
 import Nav from './Nav.jsx';
 import Footer from './components/Footer.jsx';
 import PageLoader from './components/PageLoader.jsx';
 
-// Lazy-loaded page components — all share the single PageLoader during transitions
-const Home = lazy(() => import('./Home.jsx'));
-const About = lazy(() => import('./components/About.jsx'));
-const Contact = lazy(() => import('./components/Contact.jsx'));
-const Learning = lazy(() => import('./components/Learning.jsx'));
-const Upload = lazy(() => import('./components/Upload.jsx'));
-const Signup = lazy(() => import('./components/Signup.jsx'));
-const Login = lazy(() => import('./components/Login.jsx'));
-const Dashboard = lazy(() => import('./components/Dashboard.jsx'));
-const ResultDetail = lazy(() => import('./components/ResultDetail.jsx'));
-const Settings = lazy(() => import('./components/Settings.jsx'));
-const GenerateQuiz = lazy(() => import('./components/GenerateQuiz.jsx'));
-const Admin = lazy(() => import('./components/AdminDashboard.jsx'));
-const VerifyEmail = lazy(() => import('./components/VerifyEmail.jsx'));
-const ForgotPassword = lazy(() => import('./components/ForgotPassword.jsx'));
-const ResetPassword = lazy(() => import('./components/ResetPassword.jsx'));
-const Pricing = lazy(() => import('./components/Pricing.jsx'));
-const PaymentCallback = lazy(() => import('./components/PaymentCallback.jsx'));
+// ── Auth guards ─────────────────────────────────────────────────────────────
+import { useAuth } from './contexts/AuthContext.jsx';
 
-// Wrapper component to access location
+function OrgRoute({ children, allowedRoles }) {
+  const { isAuthenticated, user, loading } = useAuth();
+  if (loading) return <PageLoader />;
+  if (!isAuthenticated || !user?.orgRole) return <Navigate to="/Login" replace />;
+  if (allowedRoles && !allowedRoles.includes(user.orgRole)) return <Navigate to="/" replace />;
+  return children;
+}
+
+// ── Public pages ─────────────────────────────────────────────────────────────
+const Home           = lazy(() => import('./Home.jsx'));
+const About          = lazy(() => import('./components/About.jsx'));
+const Contact        = lazy(() => import('./components/Contact.jsx'));
+const Signup         = lazy(() => import('./components/Signup.jsx'));
+const Login          = lazy(() => import('./components/Login.jsx'));
+const VerifyEmail    = lazy(() => import('./components/VerifyEmail.jsx'));
+const ForgotPassword = lazy(() => import('./components/ForgotPassword.jsx'));
+const ResetPassword  = lazy(() => import('./components/ResetPassword.jsx'));
+const SchoolsLanding = lazy(() => import('./components/SchoolsLanding.jsx'));
+const OrgSignup      = lazy(() => import('./components/OrgSignup.jsx'));
+const OrgSetupWizard = lazy(() => import('./components/OrgSetupWizard.jsx'));
+const Pricing        = lazy(() => import('./components/Pricing.jsx'));
+
+// ── Role-scoped dashboards (per master plan Section 12) ──────────────────────
+const OrgAdminDashboard = lazy(() => import('./components/OrgAdminDashboard.jsx'));
+const TeacherDashboard  = lazy(() => import('./components/TeacherDashboard.jsx'));
+const StudentDashboard  = lazy(() => import('./components/StudentDashboard.jsx'));
+const StudentAssignmentView = lazy(() => import('./components/StudentAssignmentView.jsx'));
+const GuardianPortal    = lazy(() => import('./components/GuardianPortal.jsx'));
+const MembersManager    = lazy(() => import('./components/MembersManager.jsx'));
+const AcademicCalendar  = lazy(() => import('./components/AcademicCalendar.jsx'));
+const ClassManager      = lazy(() => import('./components/ClassManager.jsx'));
+const GradeBook         = lazy(() => import('./components/GradeBook.jsx'));
+const AttendanceMarker  = lazy(() => import('./components/AttendanceMarker.jsx'));
+const AnnouncementComposer = lazy(() => import('./components/AnnouncementComposer.jsx'));
+const ReportCardView    = lazy(() => import('./components/ReportCardView.jsx'));
+const GradingSettings   = lazy(() => import('./components/GradingSettings.jsx'));
+
+// ── Teacher B2C features (role-gated) ────────────────────────────────────────
+const Upload            = lazy(() => import('./components/Upload.jsx'));
+const Learning          = lazy(() => import('./components/Learning.jsx'));
+const GenerateQuiz      = lazy(() => import('./components/GenerateQuiz.jsx'));
+const AssignmentManager = lazy(() => import('./components/AssignmentManager.jsx'));
+
+// ── Vayrex super-admin ───────────────────────────────────────────────────────
+const Admin = lazy(() => import('./components/AdminDashboard.jsx'));
+
 const AppContent = () => {
   const location = useLocation();
-  
-  // Scroll to top on route change
+  const { user } = useAuth();
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
-  
-  // Check if current route is an admin route
+
   const isAdminRoute = location.pathname.startsWith('/admin');
 
   return (
     <>
-      {/* Only show Nav if NOT on admin route */}
       {!isAdminRoute && <Nav />}
-      
-      {/* Page content changes based on URL — single PageLoader for all transitions */}
+
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Home />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/Signup" element={<Signup />} />
-          <Route path="/Login" element={<Login />} />
-          <Route path="/verify-email" element={<VerifyEmail />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/pricing" element={<Pricing />} />
-          <Route path="/payment/callback" element={<PaymentCallback />} />
-          
-          {/* Protected User Routes */}
-          <Route path="/learn" element={
-            <ProtectedRoute>
-              <Learning />
-            </ProtectedRoute>
-          } />
-          <Route path="/Upload" element={
-            <ProtectedRoute>
-              <Upload />
-            </ProtectedRoute>
-          } />
-          <Route path="/Dashboard" element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="/results/:resultId" element={
-            <ProtectedRoute>
-              <ResultDetail />
-            </ProtectedRoute>
-          } />
-          <Route path="/settings" element={
-            <ProtectedRoute>
-              <Settings />
-            </ProtectedRoute>
-          } />
-          <Route path='/generate-quiz' element={
-            <ProtectedRoute>
-              <GenerateQuiz />
-            </ProtectedRoute>
+          {/* ── Public ───────────────────────────────── */}
+          <Route path="/"                  element={<Home />} />
+          <Route path="/about"             element={<About />} />
+          <Route path="/contact"           element={<Contact />} />
+          <Route path="/Signup"            element={<Signup />} />
+          <Route path="/Login"             element={<Login />} />
+          <Route path="/verify-email"      element={<VerifyEmail />} />
+          <Route path="/forgot-password"   element={<ForgotPassword />} />
+          <Route path="/reset-password"    element={<ResetPassword />} />
+          <Route path="/for-schools"       element={<SchoolsLanding />} />
+          <Route path="/org-signup"        element={<OrgSignup />} />
+          <Route path="/pricing"           element={<Pricing />} />
+
+          {/* ── Org setup wizard (owner / it_admin) ─── */}
+          <Route path="/org-setup" element={
+            <OrgRoute allowedRoles={['owner', 'it_admin']}>
+              <OrgSetupWizard />
+            </OrgRoute>
           } />
 
-          {/* Admin Routes - Protected with Role Check */}
-          <Route path="/admin" element={
-            <AdminRoute>
-              <Admin />
-            </AdminRoute>
+          {/* ── Principal / Org Admin dashboard ──────── */}
+          <Route path="/org-admin" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin', 'it_admin']}>
+              <OrgAdminDashboard />
+            </OrgRoute>
           } />
-          <Route path="/admin/*" element={
-            <AdminRoute>
-              <Admin />
-            </AdminRoute>
+          <Route path="/org-admin/members" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <MembersManager />
+            </OrgRoute>
           } />
-          
-          {/* 404 Page */}
-          <Route path="*" element={<h1>404 - Page Not Found</h1>} />
+          <Route path="/org-admin/academic" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin', 'it_admin']}>
+              <AcademicCalendar />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/classes" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin', 'it_admin']}>
+              <ClassManager />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/gradebook" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <GradeBook />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/report-cards" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <ReportCardView />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/announcements" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <AnnouncementComposer />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/attendance" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <AttendanceMarker />
+            </OrgRoute>
+          } />
+          <Route path="/org-admin/grading-settings" element={
+            <OrgRoute allowedRoles={['owner', 'org_admin']}>
+              <GradingSettings />
+            </OrgRoute>
+          } />
+
+          {/* ── Teacher dashboard ─────────────────────── */}
+          <Route path="/teacher" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <TeacherDashboard />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/gradebook" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <GradeBook />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/attendance" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <AttendanceMarker />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/announcements" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <AnnouncementComposer />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/report-cards" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <ReportCardView />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/upload" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <Upload />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/learning" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <Learning />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/generate-quiz" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <GenerateQuiz />
+            </OrgRoute>
+          } />
+          <Route path="/teacher/assignments" element={
+            <OrgRoute allowedRoles={['teacher', 'org_admin', 'owner']}>
+              <AssignmentManager />
+            </OrgRoute>
+          } />
+
+          {/* ── Student dashboard ─────────────────────── */}
+          <Route path="/student" element={
+            <OrgRoute allowedRoles={['student']}>
+              <StudentDashboard />
+            </OrgRoute>
+          } />
+          <Route path="/student/assignments/:id" element={
+            <OrgRoute allowedRoles={['student']}>
+              <StudentAssignmentView />
+            </OrgRoute>
+          } />
+          <Route path="/student/report-card" element={
+            <OrgRoute allowedRoles={['student']}>
+              <ReportCardView />
+            </OrgRoute>
+          } />
+
+          {/* ── Guardian portal ───────────────────────── */}
+          <Route path="/guardian-portal" element={
+            <OrgRoute allowedRoles={['guardian']}>
+              <GuardianPortal />
+            </OrgRoute>
+          } />
+
+          {/* ── Vayrex super-admin ────────────────────── */}
+          <Route path="/admin"   element={<Admin />} />
+          <Route path="/admin/*" element={<Admin />} />
+
+          {/* ── Catch-all ─────────────────────────────── */}
+          <Route path="*" element={<h1 style={{ textAlign: 'center', padding: '4rem' }}>404 — Page Not Found</h1>} />
         </Routes>
       </Suspense>
 
-      {/* Only show Footer if NOT on admin route */}
       {!isAdminRoute && <Footer />}
 
       <ToastContainer

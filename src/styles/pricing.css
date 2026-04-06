@@ -274,7 +274,7 @@
 }
 
 .plan-btn.outline {
-  background: transparent;
+  background: black;
   color: var(--text-primary);
   border: 2px solid var(--border-color);
 }

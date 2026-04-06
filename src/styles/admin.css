@@ -80,8 +80,8 @@
 }
 
 .btn-dismiss {
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  background: black;
+  color: #ffffff;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -674,11 +674,11 @@
   flex: 1;
   padding: 0.55rem 0.75rem;
   border: none;
-  background: transparent;
+  background: #f3f4f6;
   border-radius: var(--radius-sm);
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--text-light);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.3s var(--ease-out-expo);
   display: flex;

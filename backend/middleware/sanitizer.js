@@ -6,14 +6,14 @@ const VALIDATE_ONLY_FIELDS = new Set([
   'extractedText',
   'message',
   'answers',
-  'answer', 
+  'answer',
   'explanation',
   'questionText',
-  'options',           
-  'body', 
-  'description', 
-  'notes',             
-  'rawContent'        
+  'options',
+  'body',
+  'description',
+  'notes',
+  'rawContent'
 ]);
 
 // ===== COMPREHENSIVE NOSQL OPERATOR BLACKLIST =====
@@ -49,25 +49,25 @@ const NOSQL_OPERATORS = new Set([
 const suspiciousPatterns = {
   // MongoDB operators (backup pattern matching)
   nosql: /\$[a-zA-Z]+/g,
-  
+
   // XSS patterns
   xss: /<script|<iframe|<svg|<object|<embed|<applet|javascript:|on\w+\s*=/gi,
-  
+
   // SQL injection patterns
   sql: /(union\s+select|insert\s+into|update\s+.*set|delete\s+from|drop\s+table|exec\s*\(|execute\s*\()/gi,
-  
+
   // Command injection
   command: /[;&|`$(){}[\]]/g,
-  
+
   // Path traversal
   pathTraversal: /\.\.[\/\\]/g,
-  
+
   // Null bytes
   nullByte: /\x00/g,
-  
+
   // LDAP injection
   ldap: /[()&|*]/g,
-  
+
   // Unicode control characters
   controlChars: /[\x00-\x1F\x7F-\x9F]/g
 };
@@ -83,7 +83,7 @@ const containsNoSQLOperators = (obj) => {
     if (NOSQL_OPERATORS.has(key) || key.startsWith('$')) {
       return true;
     }
-    
+
     // Recursively check nested objects
     if (typeof obj[key] === 'object' && obj[key] !== null) {
       if (containsNoSQLOperators(obj[key])) {
@@ -91,7 +91,7 @@ const containsNoSQLOperators = (obj) => {
       }
     }
   }
-  
+
   return false;
 };
 
@@ -170,17 +170,17 @@ const sanitizeString = (value, allowHtml = false, fieldName = '') => {
       type: typeof value,
       value: JSON.stringify(value)
     });
-    
+
     // Convert to string or reject
     if (value === null || value === undefined) {
       return '';
     }
-    
+
     // Convert numbers/booleans to strings
     if (typeof value === 'number' || typeof value === 'boolean') {
       return String(value);
     }
-    
+
     //   REJECT objects/arrays/functions
     throw new Error(`Invalid type for field "${fieldName}": expected string, got ${typeof value}`);
   }
@@ -192,7 +192,7 @@ const sanitizeString = (value, allowHtml = false, fieldName = '') => {
     if (pattern === 'xss' && allowHtml) {
       return; // Skip XSS sanitization for HTML-allowed fields
     }
-    
+
     sanitized = sanitized.replace(suspiciousPatterns[pattern], '');
   });
 
@@ -236,7 +236,7 @@ const sanitizeObject = (obj, allowHtmlFields = [], parentKey = '') => {
   if (Array.isArray(obj)) {
     return obj.map((item, index) => {
       const itemKey = `${parentKey}[${index}]`;
-      
+
       if (typeof item === 'string') {
         return sanitizeString(item, allowHtmlFields.includes(parentKey), itemKey);
       } else if (typeof item === 'object' && item !== null) {
@@ -316,7 +316,7 @@ const sanitizeRequestBody = (allowHtmlFields = []) => {
       // SECURITY: Block prototype pollution in body keys
       const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
       for (const dk of dangerousKeys) {
-        if (dk in req.body) {
+        if (Object.prototype.hasOwnProperty.call(req.body, dk)) {
           Logger.error('Prototype pollution attempt detected in body', { key: dk, path: req.path, ip: req.ip });
           delete req.body[dk];
         }
@@ -384,7 +384,7 @@ const sanitizeUrlParams = (req, res, next) => {
   try {
     //  FIX #7: SANITIZE URL PARAMETERS
     const sanitizedParams = {};
-    
+
     Object.keys(req.params).forEach(key => {
       // SECURITY: Block prototype pollution attempts
       if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
@@ -393,7 +393,7 @@ const sanitizeUrlParams = (req, res, next) => {
       }
 
       const value = req.params[key];
-      
+
       if (typeof value === 'string') {
         // Sanitize as string
         sanitizedParams[key] = sanitizeString(value, false, `params.${key}`);
@@ -432,23 +432,23 @@ const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') {
     return false;
   }
-  
+
   // Trim and lowercase for consistency
   const trimmed = email.trim().toLowerCase();
-  
+
   // Basic email pattern
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  
+
   // Additional validation rules
   if (trimmed.length < 5 || trimmed.length > 255) {
     return false;
   }
-  
+
   // Check for suspicious patterns
   if (trimmed.includes('..') || trimmed.startsWith('.') || trimmed.endsWith('.')) {
     return false;
   }
-  
+
   return emailPattern.test(trimmed);
 };
 
@@ -457,17 +457,17 @@ const validateFileName = (filename) => {
   if (!filename || typeof filename !== 'string') {
     return false;
   }
-  
+
   // Check for path traversal
   if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
     return false;
   }
-  
+
   // Check length
   if (filename.length < 1 || filename.length > 255) {
     return false;
   }
-  
+
   // Check for valid characters
   const validPattern = /^[a-zA-Z0-9\s._-]+$/;
   return validPattern.test(filename);

@@ -14,14 +14,15 @@ if ! command -v ngrok &> /dev/null; then
     exit 1
 fi
 
-echo "  Starting HTTPS tunnel for localhost:5001"
+echo "  Starting HTTPS tunnel for localhost:5002 (B2B backend)"
 echo ""
 echo " Once started:"
 echo "   1. Copy the HTTPS URL (https://abc123.ngrok-free.app)"
-echo "   2. Add it to backend/.env CORS_ORIGINS"
-echo "   3. Restart backend server"
-echo "   4. Use the HTTPS URL on mobile - CSRF will work!"
+echo "   2. Set it as VITE_API_URL in Netlify dashboard (append /api)"
+echo "   3. Add it to backend/.env CORS_ORIGINS"
+echo "   4. Restart backend server"
+echo "   5. Trigger a Netlify redeploy so the frontend picks up the new URL"
 echo ""
 
-# Start ngrok with HTTPS scheme only
-ngrok http 5001 --scheme https
+# Start ngrok with HTTPS scheme only — tunnels B2B backend on port 5002
+ngrok http 5002 --scheme https

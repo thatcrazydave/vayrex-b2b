@@ -36,7 +36,7 @@ services:
     ports:
       - "80:80"
     environment:
-      - VITE_API_URL=http://localhost:5001/api
+      - VITE_API_URL=http://localhost:5002/api
     depends_on:
       - backend
     restart: unless-stopped

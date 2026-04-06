@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    index: true
+    index: true,
   },
 
   username: {
@@ -18,32 +18,34 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
-    index: true
+    index: true,
   },
 
   password: {
     type: String,
-    required: function () { return !this.firebaseUid; },
-    select: false
+    required: function () {
+      return !this.firebaseUid;
+    },
+    select: false,
   },
 
   firebaseUid: {
     type: String,
     unique: true,
     sparse: true,
-    index: true
+    index: true,
   },
 
   provider: {
     type: String,
-    enum: ['email', 'firebase', 'google'],
-    default: 'email'
+    enum: ["email", "firebase", "google"],
+    default: "email",
   },
 
   fullname: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
   },
 
   photoURL: String,
@@ -51,62 +53,45 @@ const userSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    index: true
+    index: true,
   },
 
   updatedAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
 
   // Admin role for admin panel access
   role: {
     type: String,
-    enum: ['user', 'admin', 'superadmin'],
-    default: 'user',
-    index: true
+    enum: ["user", "admin", "superadmin"],
+    default: "user",
+    index: true,
   },
 
   // Subscription tier for feature limits
   subscriptionTier: {
     type: String,
-    enum: ['free', 'starter', 'pro'],
-    default: 'free',
-    index: true
+    enum: ["free", "school_starter", "school_pro", "enterprise"],
+    default: "free",
+    index: true,
   },
 
   subscriptionStatus: {
     type: String,
-    enum: ['active', 'inactive', 'trial', 'cancelled', 'expired', 'past_due'],
-    default: 'active',
-    index: true
+    enum: ["active", "inactive", "trial", "cancelled", "expired", "past_due"],
+    default: "active",
+    index: true,
   },
 
   subscriptionStartDate: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
 
   subscriptionExpiry: {
     type: Date,
-    default: null
-  },
-
-  // Payment tracking for Paystack
-  paystackCustomerId: {
-    type: String,
-    sparse: true,
-    index: true
-  },
-
-  paystackSubscriptionCode: {
-    type: String,
-    sparse: true
-  },
-
-  paystackAuthorizationCode: {
-    type: String,
-    sparse: true
+    default: null,
   },
 
   // Usage tracking
@@ -118,7 +103,7 @@ const userSchema = new mongoose.Schema({
     tokensUsedThisMonth: { type: Number, default: 0 },
     questionsGenerated: { type: Number, default: 0 },
     quizzesTaken: { type: Number, default: 0 },
-    lastResetDate: { type: Date, default: Date.now }
+    lastResetDate: { type: Date, default: Date.now },
   },
 
   // Tier limits — no hardcoded defaults, set live from DB via pre-save hook
@@ -136,59 +121,74 @@ const userSchema = new mongoose.Schema({
     noteSummary: { type: Boolean },
     priorityProcessing: { type: Boolean },
     revealsPerQuiz: { type: Number },
-    aiModel: { type: String, default: 'gpt-5-mini-2025-08-07' }
+    aiModel: { type: String, default: "gpt-5-mini-2025-08-07" },
   },
 
   // User preferences (single definition - DO NOT duplicate)
   preferences: {
     defaultDifficulty: {
       type: String,
-      enum: ['easy', 'medium', 'hard'],
-      default: 'medium'
+      enum: ["easy", "medium", "hard"],
+      default: "medium",
     },
     emailNotifications: { type: Boolean, default: true },
     weeklyReports: { type: Boolean, default: false },
     marketingEmails: { type: Boolean, default: false },
-    systemAlerts: { type: Boolean, default: true }   // Only relevant for admins
+    systemAlerts: { type: Boolean, default: true }, // Only relevant for admins
   },
 
   // Account status
   isActive: {
     type: Boolean,
     default: true,
-    index: true
+    index: true,
+  },
+
+  // B2B member lifecycle state.
+  // pending_approval - self-registered without an invite; awaits admin review
+  // active            - fully cleared to use the platform
+  // suspended         - blocked by an org admin or Vayrex staff
+  //
+  // Invited users skip pending_approval: their account is set to 'active'
+  // when the invite is accepted (auth.js signup handler).
+  // Org owners registered via /api/onboarding/org/register are always 'active'.
+  accountStatus: {
+    type: String,
+    enum: ["pending_approval", "active", "suspended"],
+    default: "active",
+    index: true,
   },
 
   isDeleted: {
     type: Boolean,
     default: false,
-    index: true
+    index: true,
   },
 
   deletedAt: Date,
 
   lastLogin: {
     type: Date,
-    index: true
+    index: true,
   },
 
   // Token versioning for immediate role/permission changes
   // Increment this field to invalidate all existing tokens
   tokenVersion: {
     type: Number,
-    default: 0
+    default: 0,
   },
 
   loginAttempts: {
     type: Number,
-    default: 0
+    default: 0,
   },
 
   lockUntil: Date,
 
   emailVerified: {
     type: Boolean,
-    default: false
+    default: false,
   },
 
   emailVerificationToken: String,
@@ -199,27 +199,84 @@ const userSchema = new mongoose.Schema({
   passwordResetToken: String,
   passwordResetExpires: Date,
   passwordResetCode: String,
-  passwordResetCodeExpires: Date
+  passwordResetCodeExpires: Date,
+
+  // ── B2B Org Fields ────────────────────────────────────────────
+  // null for solo B2C users; set to orgId on invitation acceptance
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Organization",
+    default: null,
+    index: true,
+  },
+
+  // Org-level role, orthogonal to the global `role` field above
+  orgRole: {
+    type: String,
+    enum: ["owner", "org_admin", "it_admin", "teacher", "student", "guardian", null],
+    default: null,
+  },
+
+  // Timestamp of when a seat was allocated — audit trail
+  seatAssignedAt: {
+    type: Date,
+    default: null,
+  },
+
+  // Students only — ObjectId of their current Classroom
+  classId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Classroom",
+    default: null,
+  },
+
+  // Guardians only — list of student ObjectIds they are linked to
+  guardianOf: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
 });
 
 // Pre-save: Auto-set limits from LIVE PricingConfig (admin dashboard)
-userSchema.pre('save', async function () {
-  if (this.isModified('subscriptionTier') || this.isNew) {
+// B2B: org members always get Pro-equivalent limits derived from org plan
+userSchema.pre("save", async function () {
+  if (this.isModified("subscriptionTier") || this.isModified("organizationId") || this.isNew) {
     try {
-      const PricingConfig = require('./PricingConfig');
+      const PricingConfig = require("./PricingConfig");
       const config = await PricingConfig.getConfig();
-      const tier = this.subscriptionTier || 'free';
+
+      let tier;
+      if (this.organizationId) {
+        // B2B: derive limits from the org's plan (Pro-equivalent for all members)
+        const Organization = require("./Organization");
+        const org = await Organization.findById(this.organizationId).select("plan").lean();
+        tier = org?.plan || "school_starter";
+      } else {
+        // B2C: derive from personal subscription tier
+        tier = this.subscriptionTier || "free";
+      }
+
       const liveLimits = config?.tiers?.[tier]?.limits;
-      if (liveLimits && typeof liveLimits === 'object') {
-        this.limits = { ...liveLimits, aiModel: this.limits?.aiModel || (tier === 'free' ? 'gpt-5-mini-2025-08-07' : 'gpt-5.1-2025-11-13') };
+      if (liveLimits && typeof liveLimits === "object") {
+        this.limits = {
+          ...liveLimits,
+          aiModel:
+            this.limits?.aiModel ||
+            (tier === "free" ? "gpt-5-mini-2025-08-07" : "gpt-5.1-2025-11-13"),
+        };
       }
     } catch (err) {
       // Fallback to seed data if DB is unavailable (e.g. first boot)
-      const { CANONICAL_TIERS } = require('./PricingConfig');
-      const tier = this.subscriptionTier || 'free';
+      const { CANONICAL_TIERS } = require("./PricingConfig");
+      const tier = this.subscriptionTier || "free";
       const fallback = CANONICAL_TIERS[tier]?.limits;
       if (fallback) {
-        this.limits = { ...fallback, aiModel: tier === 'free' ? 'gpt-5-mini-2025-08-07' : 'gpt-5.1-2025-11-13' };
+        this.limits = {
+          ...fallback,
+          aiModel: tier === "free" ? "gpt-5-mini-2025-08-07" : "gpt-5.1-2025-11-13",
+        };
       }
     }
   }
@@ -244,9 +301,9 @@ userSchema.pre("save", async function (next) {
   // Bcrypt hashes always start with $2a$, $2b$, or $2y$ and are 60 chars long
   const bcryptHashPattern = /^\$2[aby]\$\d{2}\$/;
   if (bcryptHashPattern.test(this.password) && this.password.length === 60) {
-    Logger.warn('Attempted to hash an already-hashed password', {
+    Logger.warn("Attempted to hash an already-hashed password", {
       userId: this._id,
-      emailPreview: this.email?.substring(0, 3) + '***'
+      emailPreview: this.email?.substring(0, 3) + "***",
     });
     // Password is already hashed, skip hashing
     return next();
@@ -263,7 +320,9 @@ userSchema.methods.hasReachedUploadLimit = function () {
   if (this.limits.uploadsPerDay !== -1) {
     // Auto-reset daily count if it's a new day
     const now = new Date();
-    const lastReset = this.usage.lastDailyReset ? new Date(this.usage.lastDailyReset) : new Date(0);
+    const lastReset = this.usage.lastDailyReset
+      ? new Date(this.usage.lastDailyReset)
+      : new Date(0);
     if (now.toDateString() !== lastReset.toDateString()) {
       this.usage.uploadsToday = 0;
       this.usage.lastDailyReset = now;
@@ -294,7 +353,7 @@ userSchema.methods.getNextMonthlyReset = function () {
 // Check if user has enough storage
 userSchema.methods.hasStorageSpace = function (fileSizeMB) {
   if (this.limits.maxStorageMB === -1) return true;
-  return (this.usage.storageUsedMB + fileSizeMB) <= this.limits.maxStorageMB;
+  return this.usage.storageUsedMB + fileSizeMB <= this.limits.maxStorageMB;
 };
 
 // Check if file size is within limit
@@ -305,7 +364,7 @@ userSchema.methods.isFileSizeAllowed = function (fileSizeMB) {
 // Check if user has enough tokens for a request
 userSchema.methods.hasTokensAvailable = function (estimatedTokens) {
   if (this.limits.tokensPerMonth === -1) return true;
-  return (this.usage.tokensUsedThisMonth + estimatedTokens) <= this.limits.tokensPerMonth;
+  return this.usage.tokensUsedThisMonth + estimatedTokens <= this.limits.tokensPerMonth;
 };
 
 // Check if request token count is within per-request limit
@@ -315,11 +374,13 @@ userSchema.methods.isTokenCountAllowed = function (tokenCount) {
 
 // Increment upload count (atomic operation - tracks both daily and monthly)
 userSchema.methods.incrementUploadCount = async function () {
-  const result = await mongoose.model('User').findByIdAndUpdate(
-    this._id,
-    { $inc: { 'usage.uploadsThisMonth': 1, 'usage.uploadsToday': 1 } },
-    { new: true, select: 'usage.uploadsThisMonth usage.uploadsToday' }
-  );
+  const result = await mongoose
+    .model("User")
+    .findByIdAndUpdate(
+      this._id,
+      { $inc: { "usage.uploadsThisMonth": 1, "usage.uploadsToday": 1 } },
+      { new: true, select: "usage.uploadsThisMonth usage.uploadsToday" },
+    );
   this.usage.uploadsThisMonth = result.usage.uploadsThisMonth;
   this.usage.uploadsToday = result.usage.uploadsToday;
   return this.usage.uploadsThisMonth;
@@ -330,15 +391,17 @@ userSchema.methods.addStorageUsage = async function (fileSizeMB) {
   const query = { _id: this._id };
   // If there's a storage limit, enforce it atomically
   if (this.limits.maxStorageMB !== -1) {
-    query['usage.storageUsedMB'] = { $lte: this.limits.maxStorageMB - fileSizeMB };
+    query["usage.storageUsedMB"] = { $lte: this.limits.maxStorageMB - fileSizeMB };
   }
-  const result = await mongoose.model('User').findOneAndUpdate(
-    query,
-    { $inc: { 'usage.storageUsedMB': fileSizeMB } },
-    { new: true, select: 'usage.storageUsedMB' }
-  );
+  const result = await mongoose
+    .model("User")
+    .findOneAndUpdate(
+      query,
+      { $inc: { "usage.storageUsedMB": fileSizeMB } },
+      { new: true, select: "usage.storageUsedMB" },
+    );
   if (!result) {
-    throw new Error('Insufficient storage space');
+    throw new Error("Insufficient storage space");
   }
   this.usage.storageUsedMB = result.usage.storageUsedMB;
   return this.usage.storageUsedMB;
@@ -346,17 +409,18 @@ userSchema.methods.addStorageUsage = async function (fileSizeMB) {
 
 // Reduce storage usage when file deleted (atomic operation to prevent race conditions)
 userSchema.methods.reduceStorageUsage = async function (fileSizeMB) {
-  const result = await mongoose.model('User').findByIdAndUpdate(
-    this._id,
-    { $inc: { 'usage.storageUsedMB': -fileSizeMB } },
-    { new: true, select: 'usage.storageUsedMB' }
-  );
+  const result = await mongoose
+    .model("User")
+    .findByIdAndUpdate(
+      this._id,
+      { $inc: { "usage.storageUsedMB": -fileSizeMB } },
+      { new: true, select: "usage.storageUsedMB" },
+    );
   // Ensure we don't go below 0
   if (result.usage.storageUsedMB < 0) {
-    await mongoose.model('User').findByIdAndUpdate(
-      this._id,
-      { $set: { 'usage.storageUsedMB': 0 } }
-    );
+    await mongoose
+      .model("User")
+      .findByIdAndUpdate(this._id, { $set: { "usage.storageUsedMB": 0 } });
     this.usage.storageUsedMB = 0;
   } else {
     this.usage.storageUsedMB = result.usage.storageUsedMB;
@@ -366,11 +430,13 @@ userSchema.methods.reduceStorageUsage = async function (fileSizeMB) {
 
 // Add token usage (atomic operation to prevent race conditions)
 userSchema.methods.addTokenUsage = async function (tokensUsed) {
-  const result = await mongoose.model('User').findByIdAndUpdate(
-    this._id,
-    { $inc: { 'usage.tokensUsedThisMonth': tokensUsed } },
-    { new: true, select: 'usage.tokensUsedThisMonth' }
-  );
+  const result = await mongoose
+    .model("User")
+    .findByIdAndUpdate(
+      this._id,
+      { $inc: { "usage.tokensUsedThisMonth": tokensUsed } },
+      { new: true, select: "usage.tokensUsedThisMonth" },
+    );
   this.usage.tokensUsedThisMonth = result.usage.tokensUsedThisMonth;
   return this.usage.tokensUsedThisMonth;
 };
@@ -383,36 +449,41 @@ userSchema.methods.resetMonthlyUsage = async function () {
   await this.save();
 };
 
-// Check if subscription is expired
+// Check if subscription is expired — only relevant for non-org accounts
 userSchema.methods.isSubscriptionExpired = function () {
+  if (this.organizationId) return false; // org members don't have personal subscriptions
   if (!this.subscriptionExpiry) return false;
   return new Date() > this.subscriptionExpiry;
 };
 
-// Upgrade or downgrade tier
+// Upgrade or downgrade tier — only for non-org accounts
+// Org plan changes must go through the Organisation model
 userSchema.methods.updateTier = async function (newTier, expiryDate = null) {
+  if (this.organizationId) {
+    throw new Error("Tier updates for org members must go through the Organisation model");
+  }
   this.subscriptionTier = newTier;
   this.subscriptionExpiry = expiryDate;
-  this.subscriptionStatus = 'active';
+  this.subscriptionStatus = "active";
   await this.save();
   return this;
 };
 
 // Get remaining uploads
 userSchema.methods.getRemainingUploads = function () {
-  if (this.limits.uploadsPerMonth === -1) return 'unlimited';
+  if (this.limits.uploadsPerMonth === -1) return "unlimited";
   return Math.max(0, this.limits.uploadsPerMonth - this.usage.uploadsThisMonth);
 };
 
 // Get remaining storage in MB
 userSchema.methods.getRemainingStorage = function () {
-  if (this.limits.maxStorageMB === -1) return 'unlimited';
+  if (this.limits.maxStorageMB === -1) return "unlimited";
   return Math.max(0, this.limits.maxStorageMB - this.usage.storageUsedMB);
 };
 
 // Get remaining tokens
 userSchema.methods.getRemainingTokens = function () {
-  if (this.limits.tokensPerMonth === -1) return 'unlimited';
+  if (this.limits.tokensPerMonth === -1) return "unlimited";
   return Math.max(0, this.limits.tokensPerMonth - this.usage.tokensUsedThisMonth);
 };
 
@@ -442,54 +513,61 @@ userSchema.index({ lastLogin: -1 });
 // ★ This is the PRIMARY method — reads from the DB every time
 userSchema.statics.getLiveTierLimits = async function (tier) {
   try {
-    const PricingConfig = require('./PricingConfig');
+    const PricingConfig = require("./PricingConfig");
     const config = await PricingConfig.getConfig();
     const liveLimits = config?.tiers?.[tier]?.limits;
-    if (liveLimits && typeof liveLimits === 'object') {
+    if (liveLimits && typeof liveLimits === "object") {
       return liveLimits;
     }
   } catch (err) {
-    Logger.warn('getLiveTierLimits: PricingConfig unavailable, using seed fallback', { tier, error: err.message });
+    Logger.warn("getLiveTierLimits: PricingConfig unavailable, using seed fallback", {
+      tier,
+      error: err.message,
+    });
   }
   // Fallback to seed data
-  const { CANONICAL_TIERS } = require('./PricingConfig');
+  const { CANONICAL_TIERS } = require("./PricingConfig");
   return CANONICAL_TIERS[tier]?.limits || CANONICAL_TIERS.free.limits;
 };
 
 // Synchronous fallback (uses seed data) — prefer getLiveTierLimits() instead
 userSchema.statics.getTierLimits = function (tier) {
-  const { CANONICAL_TIERS } = require('./PricingConfig');
+  const { CANONICAL_TIERS } = require("./PricingConfig");
   return CANONICAL_TIERS[tier]?.limits || CANONICAL_TIERS.free.limits;
 };
 
 // Get LIVE tier pricing from admin-editable PricingConfig
 userSchema.statics.getLiveTierPricing = async function (tier) {
   try {
-    const PricingConfig = require('./PricingConfig');
+    const PricingConfig = require("./PricingConfig");
     const config = await PricingConfig.getConfig();
     const tierData = config?.tiers?.[tier];
     if (tierData) {
-      return { monthlyUSD: tierData.monthlyUSD, yearlyUSD: tierData.yearlyUSD, currency: 'USD' };
+      return {
+        monthlyUSD: tierData.monthlyUSD,
+        yearlyUSD: tierData.yearlyUSD,
+        currency: "USD",
+      };
     }
   } catch (err) {
-    Logger.warn('getLiveTierPricing: PricingConfig unavailable', { tier, error: err.message });
+    Logger.warn("getLiveTierPricing: PricingConfig unavailable", { tier, error: err.message });
   }
-  const { CANONICAL_TIERS } = require('./PricingConfig');
+  const { CANONICAL_TIERS } = require("./PricingConfig");
   const t = CANONICAL_TIERS[tier] || CANONICAL_TIERS.free;
-  return { monthlyUSD: t.monthlyUSD, yearlyUSD: t.yearlyUSD, currency: 'USD' };
+  return { monthlyUSD: t.monthlyUSD, yearlyUSD: t.yearlyUSD, currency: "USD" };
 };
 
 // Synchronous fallback
 userSchema.statics.getTierPricing = function (tier) {
-  const { CANONICAL_TIERS } = require('./PricingConfig');
+  const { CANONICAL_TIERS } = require("./PricingConfig");
   const t = CANONICAL_TIERS[tier] || CANONICAL_TIERS.free;
-  return { monthlyUSD: t.monthlyUSD, yearlyUSD: t.yearlyUSD, currency: 'USD' };
+  return { monthlyUSD: t.monthlyUSD, yearlyUSD: t.yearlyUSD, currency: "USD" };
 };
 
 // Get all plans LIVE from admin config
 userSchema.statics.getAllPlansLive = async function () {
   try {
-    const PricingConfig = require('./PricingConfig');
+    const PricingConfig = require("./PricingConfig");
     const config = await PricingConfig.getConfig();
     if (config?.tiers) {
       return Object.entries(config.tiers).map(([tier, data]) => ({
@@ -498,18 +576,21 @@ userSchema.statics.getAllPlansLive = async function () {
         description: data.description,
         limits: data.limits,
         pricing: { monthlyUSD: data.monthlyUSD, yearlyUSD: data.yearlyUSD },
-        features: data.features
+        features: data.features,
       }));
     }
   } catch (err) {
-    Logger.warn('getAllPlansLive: PricingConfig unavailable', { error: err.message });
+    Logger.warn("getAllPlansLive: PricingConfig unavailable", { error: err.message });
   }
   // Fallback to seed
-  const { CANONICAL_TIERS } = require('./PricingConfig');
+  const { CANONICAL_TIERS } = require("./PricingConfig");
   return Object.entries(CANONICAL_TIERS).map(([tier, data]) => ({
-    tier, name: data.name, description: data.description,
-    limits: data.limits, pricing: { monthlyUSD: data.monthlyUSD, yearlyUSD: data.yearlyUSD },
-    features: data.features
+    tier,
+    name: data.name,
+    description: data.description,
+    limits: data.limits,
+    pricing: { monthlyUSD: data.monthlyUSD, yearlyUSD: data.yearlyUSD },
+    features: data.features,
   }));
 };
 

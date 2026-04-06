@@ -81,7 +81,7 @@ export default function ResetPassword() {
 
     try {
       let response;
-      
+
       if (useCode) {
         // Reset with code
         response = await API.post('/auth/reset-password-code', {
@@ -98,7 +98,7 @@ export default function ResetPassword() {
         }
         response = await API.post(`/auth/reset-password/${token}`, { password });
       }
-      
+
       if (response.data.success) {
         showToast.success(response.data.message || 'Password reset successfully!');
         setTimeout(() => navigate('/login'), 1500);
@@ -138,7 +138,7 @@ export default function ResetPassword() {
                 type="button"
                 onClick={() => setUseCode(true)}
                 className="auth-link"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#667eea' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#16a34a' }}
               >
                 Have a code? Enter it manually →
               </button>
@@ -171,9 +171,9 @@ export default function ResetPassword() {
                   maxLength="6"
                   required
                   disabled={loading}
-                  style={{ 
-                    fontSize: '24px', 
-                    letterSpacing: '8px', 
+                  style={{
+                    fontSize: '24px',
+                    letterSpacing: '8px',
                     textAlign: 'center',
                     fontFamily: 'monospace'
                   }}
@@ -211,7 +211,7 @@ export default function ResetPassword() {
                 )}
               </button>
             </div>
-            
+
             {passwordStrength && (
               <div className="password-requirements">
                 <div className={`requirement ${passwordStrength.requirements.minLength ? 'met' : ''}`}>
@@ -261,8 +261,8 @@ export default function ResetPassword() {
             </div>
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="btn btn-primary btn-block"
             disabled={loading || !passwordStrength?.isValid || (useCode && resetCode.length !== 6)}
           >
