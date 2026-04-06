@@ -2,7 +2,7 @@ name: Deploy to Production
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,26 +11,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      
+          node-version: "20"
+          cache: "npm"
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Install backend dependencies
         working-directory: ./backend
         run: npm ci
-      
+
       - name: Lint check
         run: npm run lint
-      
+
       - name: Build frontend
         run: npm run build
-      
+
       - name: Validate backend
         working-directory: ./backend
         run: node -c server.js
@@ -41,21 +41,21 @@ jobs:
     needs: test-and-build
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-      
+          node-version: "18"
+
       - name: Run npm audit
         run: npm audit --audit-level=moderate
         continue-on-error: true
-      
+
       - name: Run npm audit (backend)
         working-directory: ./backend
         run: npm audit --audit-level=moderate
         continue-on-error: true
-      
+
       - name: Check for secrets in code
         uses: trufflesecurity/trufflehog@main
         with:
@@ -70,10 +70,10 @@ jobs:
     if: success()
     environment:
       name: production
-      url: https://b2b.vayrex.com
+      url: https://schools-vayrex.madebyovo.me
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Notify deployment start
         run: |
           echo " PRODUCTION DEPLOYMENT INITIATED"
@@ -82,20 +82,20 @@ jobs:
           echo "Author: ${{ github.actor }}"
           echo "Timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           echo "==========================================="
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-      
+          node-version: "18"
+          cache: "npm"
+
       - name: Build frontend
         run: npm ci && npm run build
-      
+
       - name: Prepare backend
         working-directory: ./backend
         run: npm ci
-      
+
       - name: Deploy frontend to production
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
@@ -108,7 +108,7 @@ jobs:
           echo "Bucket: $PROD_S3_BUCKET"
           echo "Region: $AWS_REGION"
           echo "Note: Configure AWS credentials in GitHub secrets for actual deployment"
-      
+
       - name: Deploy backend to production
         env:
           PROD_SERVER_URL: ${{ secrets.PROD_SERVER_URL }}
@@ -119,20 +119,20 @@ jobs:
           echo " Deploying backend to production"
           echo "Server: $PROD_SERVER_URL"
           echo "Note: Configure deployment secrets for actual backend deployment"
-      
+
       - name: Verify production deployment
         run: |
           echo " Running production smoke tests"
           echo "Checking endpoints availability..."
           sleep 10
           echo "Note: Add actual production health checks here"
-      
+
       - name: Create deployment record
         run: |
           echo " Creating deployment record"
           echo "Deployment ID: $(date +%s)"
           echo "Version: ${{ github.ref }}"
-      
+
       - name: Notify production deployment success
         if: success()
         run: |
@@ -141,7 +141,7 @@ jobs:
           echo "Deployed at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           echo "Commit: ${{ github.sha }}"
           echo "==========================================="
-      
+
       - name: Notify production deployment failure
         if: failure()
         run: |

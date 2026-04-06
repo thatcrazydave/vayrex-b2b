@@ -1,12 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import API, { refreshCsrfToken } from '../services/api';
-import { 
-  signInWithGoogle, 
-  handleGoogleRedirect,
-  firebaseUserToAppUser,
-  signOutUser
-} from '../firebase/auth.js';
-import { signOut } from 'firebase/auth';
 
 const AuthContext = createContext();
 
@@ -18,42 +11,119 @@ export const useAuth = () => {
   return context;
 };
 
-// Helper to manage auth user data in sessionStorage for tab isolation
+// ── Token storage strategy ──────────────────────────────────────────────────
+// Goal: survive page refresh WITHOUT losing tab isolation.
+//
+//  localStorage   → persists across refresh (same browser, all tabs)
+//  sessionStorage → tab-specific override; wins over localStorage
+//
+// On login  → write to BOTH (so refresh restores session)
+// On init   → copy localStorage → sessionStorage if sessionStorage is empty
+//             (the "restore on refresh" step)
+// On logout → clear BOTH
+//
+// Tab isolation: a new login in a tab writes sessionStorage which overrides
+// localStorage for that tab. Other tabs are unaffected until their next
+// sessionStorage read (or refresh).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TokenStore = {
+  getToken: (key) =>
+    sessionStorage.getItem(key) || localStorage.getItem(key) || null,
+
+  setToken: (key, value) => {
+    sessionStorage.setItem(key, value);
+    localStorage.setItem(key, value);
+  },
+
+  removeToken: (key) => {
+    sessionStorage.removeItem(key);
+    localStorage.removeItem(key);
+  },
+
+  // On page load: copy localStorage values into sessionStorage so the rest
+  // of the code (which only reads sessionStorage) can find them.
+  restoreIntoSession: () => {
+    ['authToken', 'refreshToken'].forEach(key => {
+      if (!sessionStorage.getItem(key)) {
+        const persisted = localStorage.getItem(key);
+        if (persisted) sessionStorage.setItem(key, persisted);
+      }
+    });
+  },
+};
+
 const AuthStorage = {
   getUser: () => {
     try {
-      const user = sessionStorage.getItem('user');
-      return user ? JSON.parse(user) : null;
+      const raw = sessionStorage.getItem('user') || localStorage.getItem('user');
+      return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   },
   setUser: (user) => {
-    sessionStorage.setItem('user', JSON.stringify(user));
+    const json = JSON.stringify(user);
+    sessionStorage.setItem('user', json);
+    localStorage.setItem('user', json);
   },
   clear: () => {
     sessionStorage.removeItem('user');
-  }
+    localStorage.removeItem('user');
+  },
+  restoreIntoSession: () => {
+    if (!sessionStorage.getItem('user')) {
+      const persisted = localStorage.getItem('user');
+      if (persisted) sessionStorage.setItem('user', persisted);
+    }
+  },
 };
 
 // Tier configuration for display purposes
 const TIER_CONFIG = {
-  free: {
-    name: 'Free',
-    color: '#6b7280',
-    badge: 'Free'
-  },
-  starter: {
-    name: 'Starter',
+  school_starter: {
+    name: 'School Starter',
     color: '#3b82f6',
     badge: 'Starter'
   },
-  pro: {
-    name: 'Pro',
+  school_pro: {
+    name: 'School Pro',
     color: '#8b5cf6',
     badge: 'Pro'
+  },
+  enterprise: {
+    name: 'Enterprise',
+    color: '#10b981',
+    badge: 'Enterprise'
   }
 };
+
+// ── Role-based redirect helper (B2B org-scoped) ────────────────────────────
+const ROLE_REDIRECTS = {
+  owner: '/org-admin',
+  org_admin: '/org-admin',
+  it_admin: '/org-admin',
+  teacher: '/teacher',
+  student: '/student',
+  guardian: '/guardian-portal',
+};
+
+function getDashboardRoute(userData) {
+  if (!userData) return null;
+  if (userData.isAdmin || userData.isSuperAdmin || userData.role === 'admin' || userData.role === 'superadmin') {
+    return '/admin';
+  }
+  if (userData.orgRole && ROLE_REDIRECTS[userData.orgRole]) {
+    return ROLE_REDIRECTS[userData.orgRole];
+  }
+  // Org owner who just signed up but hasn't completed setup → wizard
+  if (userData.organizationId && !userData.orgRole) {
+    return '/org-setup';
+  }
+  return null;
+}
+
+export { getDashboardRoute };
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -73,10 +143,6 @@ export const AuthProvider = ({ children }) => {
     initializeAuth();
   }, []);
 
-  useEffect(() => {
-    checkGoogleRedirect();
-  }, []);
-
   //  Fetch CSRF token on mount
   useEffect(() => {
     const initCsrf = async () => {
@@ -87,7 +153,7 @@ export const AuthProvider = ({ children }) => {
         console.error('  CSRF initialization failed:', err);
       }
     };
-    
+
     initCsrf();
   }, []);
 
@@ -116,11 +182,11 @@ export const AuthProvider = ({ children }) => {
           };
           sessionStorage.setItem('user', JSON.stringify(essentialUser));
         }
-        
+
         // Clean up expired tokens if user is not authenticated
         if (!user) {
-          sessionStorage.removeItem('authToken');
-          sessionStorage.removeItem('refreshToken');
+          TokenStore.removeToken('authToken');
+          TokenStore.removeToken('refreshToken');
         }
       } catch (err) {
         console.error('sessionStorage cleanup error:', err);
@@ -187,29 +253,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const checkGoogleRedirect = async () => {
-    try {
-      const firebaseUser = await handleGoogleRedirect();
-      if (firebaseUser) {
-        await processFirebaseUser(firebaseUser);
-      }
-    } catch (err) {
-      console.error('Google redirect check error:', err);
-    }
-  };
-
   const initializeAuth = async () => {
     try {
       setLoading(true);
 
-      // Check for access token in sessionStorage (tab-specific for true isolation)
-      const accessToken = sessionStorage.getItem('authToken') || sessionStorage.getItem('accessToken');
+      // Step 1: Restore persisted tokens into sessionStorage.
+      // sessionStorage is wiped on every page refresh.
+      // Copy from localStorage so the API interceptor can find tokens.
+      TokenStore.restoreIntoSession();
+      AuthStorage.restoreIntoSession();
+
+      // Step 2: Read tokens
+      const accessToken  = sessionStorage.getItem('authToken') || sessionStorage.getItem('accessToken');
       const refreshToken = sessionStorage.getItem('refreshToken');
 
+      // Normalize legacy key
       if (!sessionStorage.getItem('authToken') && accessToken) {
         sessionStorage.setItem('authToken', accessToken);
       }
-      
+
       if (!accessToken && !refreshToken) {
         setUser(null);
         setIsInitialized(true);
@@ -220,20 +282,18 @@ export const AuthProvider = ({ children }) => {
       if (!accessToken && refreshToken) {
         try {
           const refreshResponse = await API.post('/auth/refresh', { refreshToken });
-          
+
           if (refreshResponse.data.success) {
             const { accessToken: newToken, user: userData } = refreshResponse.data.data;
-            
-            // Store new access token in sessionStorage (tab-isolated)
-            sessionStorage.setItem('authToken', newToken);
-            
+            TokenStore.setToken('authToken', newToken);
+
             const userWithRole = {
               ...userData,
               role: userData.role || 'user',
               isAdmin: userData.isAdmin || false,
               isSuperAdmin: userData.isSuperAdmin || false
             };
-            
+
             AuthStorage.setUser(userWithRole);
             setUser(userWithRole);
             setIsInitialized(true);
@@ -241,28 +301,28 @@ export const AuthProvider = ({ children }) => {
             return;
           }
         } catch (refreshError) {
-          // No valid refresh token - user not authenticated in this tab
           setUser(null);
           AuthStorage.clear();
+          TokenStore.removeToken('authToken');
+          TokenStore.removeToken('refreshToken');
           setIsInitialized(true);
           setLoading(false);
           return;
         }
       }
 
-      // We have an access token - verify it with backend
       try {
         const response = await API.get('/auth/verify');
 
         if (response.data.success) {
           const verifiedUser = response.data.data?.user;
-          const isAdmin = response.data.data?.isAdmin;
+          const isAdmin      = response.data.data?.isAdmin;
           const isSuperAdmin = response.data.data?.isSuperAdmin;
 
           const finalUser = {
             ...verifiedUser,
-            role: verifiedUser?.role || 'user',
-            isAdmin: isAdmin || verifiedUser?.isAdmin || verifiedUser?.role === 'admin' || verifiedUser?.role === 'superadmin',
+            role:         verifiedUser?.role || 'user',
+            isAdmin:      isAdmin      || verifiedUser?.isAdmin      || verifiedUser?.role === 'admin' || verifiedUser?.role === 'superadmin',
             isSuperAdmin: isSuperAdmin || verifiedUser?.isSuperAdmin || verifiedUser?.role === 'superadmin'
           };
 
@@ -272,30 +332,28 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
           return;
         } else {
-          throw new Error('Token verification failed');
-        } 
+          throw new Error('Token verification returned success:false');
+        }
       } catch (verifyError) {
-        // Access token might be expired - try to refresh if we have refresh token
-        const refreshToken = sessionStorage.getItem('refreshToken');
-        
-        if (refreshToken) {
+        const storedRefreshToken = sessionStorage.getItem('refreshToken');
+
+        if (storedRefreshToken) {
           try {
-            const refreshResponse = await API.post('/auth/refresh', { refreshToken });
-            
+            const refreshResponse = await API.post('/auth/refresh', { refreshToken: storedRefreshToken });
+
             if (refreshResponse.data.success) {
               const { accessToken: newToken, refreshToken: newRefreshToken, user: userData } = refreshResponse.data.data;
-              
-              // Store new tokens in sessionStorage
-              sessionStorage.setItem('authToken', newToken);
-              sessionStorage.setItem('refreshToken', newRefreshToken);
-              
+
+              TokenStore.setToken('authToken', newToken);
+              TokenStore.setToken('refreshToken', newRefreshToken);
+
               const userWithRole = {
                 ...userData,
-                role: userData.role || 'user',
-                isAdmin: userData.isAdmin || userData.role === 'admin' || userData.role === 'superadmin',
+                role:         userData.role || 'user',
+                isAdmin:      userData.isAdmin      || userData.role === 'admin' || userData.role === 'superadmin',
                 isSuperAdmin: userData.isSuperAdmin || userData.role === 'superadmin'
               };
-              
+
               AuthStorage.setUser(userWithRole);
               setUser(userWithRole);
               setIsInitialized(true);
@@ -306,11 +364,10 @@ export const AuthProvider = ({ children }) => {
             console.error('Token refresh failed during init:', refreshError);
           }
         }
-        
-        // If refresh failed or no refresh token - clear session
+
         console.warn('Access token invalid and refresh failed. Clearing auth data for this tab.');
-        sessionStorage.removeItem('authToken');
-        sessionStorage.removeItem('refreshToken');
+        TokenStore.removeToken('authToken');
+        TokenStore.removeToken('refreshToken');
         AuthStorage.clear();
         setUser(null);
         setIsInitialized(true);
@@ -320,7 +377,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('Auth initialization error:', err);
       setUser(null);
-      sessionStorage.removeItem('authToken');
+      TokenStore.removeToken('authToken');
       AuthStorage.clear();
       setIsInitialized(true);
       setLoading(false);
@@ -328,6 +385,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   const clearError = () => setError(null);
+
+
 
   const login = async (emailOrUsername, password) => {
     try {
@@ -341,9 +400,9 @@ export const AuthProvider = ({ children }) => {
 
       if (response.data.success) {
         const { accessToken, refreshToken, user: userData, isAdmin, isSuperAdmin, expiresIn } = response.data.data;
-        // Store access token in sessionStorage (tab-isolated)
-        sessionStorage.setItem('authToken', accessToken);
-        sessionStorage.setItem('refreshToken', refreshToken);
+        // Store tokens in BOTH storages (persist across refresh, isolate per tab)
+        TokenStore.setToken('authToken', accessToken);
+        TokenStore.setToken('refreshToken', refreshToken);
 
         // Build user with role info
         const userWithRole = {
@@ -363,12 +422,12 @@ export const AuthProvider = ({ children }) => {
           tokenExpiry: `${expiresIn / 60} minutes`
         });
 
-        return { 
-          success: true, 
+        return {
+          success: true,
           user: userWithRole,
           isAdmin: userWithRole.isAdmin,
           isSuperAdmin: userWithRole.isSuperAdmin,
-          redirectTo: userWithRole.isAdmin ? '/admin' : '/Dashboard'
+          redirectTo: getDashboardRoute(userWithRole)
         };
       }
 
@@ -392,16 +451,26 @@ export const AuthProvider = ({ children }) => {
         username: formData.username,
         email: formData.email,
         password: formData.password,
-        confirmPassword: formData.confirmPassword
+        confirmPassword: formData.confirmPassword,
+        ...(formData.inviteToken && { inviteToken: formData.inviteToken }),
       });
 
       if (response.data.success) {
+        // Account created but awaiting approval — no tokens issued
+        if (response.data.pending) {
+          return {
+            success: false,
+            pending: true,
+            error: response.data.message || 'Your account is pending review.',
+          };
+        }
+
         const { accessToken, refreshToken,  user: userData,  expiresIn } = response.data.data;
-        
-        // Store access token in sessionStorage (tab-isolated)
-        sessionStorage.setItem('authToken', accessToken);
-        sessionStorage.setItem('refreshToken', refreshToken);
-        
+
+        // Store tokens in BOTH storages
+        TokenStore.setToken('authToken', accessToken);
+        TokenStore.setToken('refreshToken', refreshToken);
+
         // New users are never admin
         const userWithRole = {
           ...userData,
@@ -413,17 +482,17 @@ export const AuthProvider = ({ children }) => {
         AuthStorage.setUser(userWithRole);
         setUser(userWithRole);
         setIsInitialized(true);
-        
-        console.log('  Signup successful - Tab isolated session created');
-        
+
         return { success: true, user: userWithRole };
       } else {
         throw new Error(response.data.error?.message || 'Signup failed');
       }
     } catch (err) {
       const message = err.response?.data?.error?.message || err.message || 'Signup failed';
+      const code = err.response?.data?.error?.code || null;
+      const hint = err.response?.data?.error?.hint || null;
       setError(message);
-      return { success: false, error: message };
+      return { success: false, error: message, code, hint };
     } finally {
       setLoading(false);
     }
@@ -435,100 +504,18 @@ export const AuthProvider = ({ children }) => {
     if (response.data.success) {
       const { accessToken, refreshToken, user } = response.data.data;
 
-      // Store tokens in sessionStorage for tab isolation
-      sessionStorage.setItem('authToken', accessToken);
-      sessionStorage.setItem('refreshToken', refreshToken);
+      // Store tokens in BOTH storages
+      TokenStore.setToken('authToken', accessToken);
+      TokenStore.setToken('refreshToken', refreshToken);
       sessionStorage.setItem('user', JSON.stringify(user));
 
       setUser(user);
   }
 };
 
-  const processFirebaseUser = async (firebaseUser) => {
-    try {
-      // Get the Firebase ID token for secure server-side verification
-      const idToken = await firebaseUser.getIdToken(true);
-      
-      const response = await API.post('/auth/firebase-login', {
-        firebaseToken: idToken,
-        email: firebaseUser.email,
-        fullname: firebaseUser.displayName,
-        photoURL: firebaseUser.photoURL
-      });
-
-      if (response.data.success) {
-        const { accessToken, refreshToken, user: userData, isAdmin, isSuperAdmin, expiresIn } = response.data.data;
-      
-        // Store access token in sessionStorage (tab-isolated)
-        sessionStorage.setItem('authToken', accessToken);
-        sessionStorage.setItem('refreshToken', refreshToken);
-        
-        // Build user with role info
-        const userWithRole = {
-          ...userData,
-          role: userData.role || 'user',
-          isAdmin: isAdmin || userData.isAdmin || false,
-          isSuperAdmin: isSuperAdmin || userData.isSuperAdmin || false
-        };
-
-        AuthStorage.setUser(userWithRole);
-        setUser(userWithRole);
-        setIsInitialized(true);
-
-        console.log('  Firebase login successful - Tab isolated session created');
-
-        return { 
-          success: true, 
-          user: userWithRole,
-          isAdmin: userWithRole.isAdmin,
-          redirectTo: userWithRole.isAdmin ? '/admin' : '/Dashboard'
-        };
-      } else {
-        throw new Error(response.data.error?.message || 'Firebase login failed');
-      }
-    } catch (err) {
-      console.error('Process Firebase user error:', err);
-      throw err;
-    }
-  };
-
-  const loginWithGoogle = async () => {
-    try {
-      setError(null);
-      setLoading(true);
-      
-    
-      const firebaseUser = await signInWithGoogle();
-      
-      if (firebaseUser === null) {
-        return { success: true };
-      }
-
-      const result = await processFirebaseUser(firebaseUser);
-      
-      return result;
-
-    } catch (err) {
-      console.error('Google login error:', err);
-      const errorMessage = err.message || 'Google login failed';
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const logout = async () => {
     try {
       setLoading(true);
-
-      if(user.provider === 'google' || user?.provider === 'firebase') {
-        try {
-          await signOutUser();
-        } catch (firebaseErr) {
-          console.error('Firebase signout skipped:', firebaseErr.message);
-        }
-      }
 
     try {
       await API.post('/auth/logout', {});
@@ -536,13 +523,13 @@ export const AuthProvider = ({ children }) => {
       console.warn('Backend logout failed, proceeding with local cleanup:', logoutErr.message);
     }
 
-    // Clear tab-specific token and user data
-    sessionStorage.removeItem('authToken');
-    sessionStorage.removeItem('refreshToken');
+    // Clear tokens from BOTH storages
+    TokenStore.removeToken('authToken');
+    TokenStore.removeToken('refreshToken');
     AuthStorage.clear();
     setUser(null);
     setError(null);
-    
+
     console.log('  Logout successful - Tab session cleared');
 
     return { success: true };
@@ -560,7 +547,7 @@ export const AuthProvider = ({ children }) => {
       const response = await API.get('/user/profile');
       if (response.data.success) {
         const updatedUser = response.data.data.user;
-        
+
         // Preserve role info
         const userWithRole = {
           ...user,
@@ -592,22 +579,22 @@ export const AuthProvider = ({ children }) => {
   };
 
   const getTierConfig = (tier = user?.subscriptionTier) => {
-    return TIER_CONFIG[tier] || TIER_CONFIG.free;
+    return TIER_CONFIG[tier] || null;
   };
 
   const hasTier = (requiredTier) => {
-    const tierHierarchy = ['free', 'starter', 'pro'];
-    const userTierIndex = tierHierarchy.indexOf(user?.subscriptionTier || 'free');
+    const tierHierarchy = ['school_starter', 'school_pro', 'enterprise'];
+    const userTierIndex = tierHierarchy.indexOf(user?.subscriptionTier || 'school_starter');
     const requiredTierIndex = tierHierarchy.indexOf(requiredTier);
     return userTierIndex >= requiredTierIndex;
   };
 
   const getUsagePercentage = (usageType) => {
     if (!user?.usage || !user?.limits) return 0;
-    
+
     let usage = 0;
     let limit = 0;
-    
+
     switch (usageType) {
       case 'uploads':
         usage = user.usage.uploadsThisMonth || 0;
@@ -624,16 +611,16 @@ export const AuthProvider = ({ children }) => {
       default:
         return 0;
     }
-    
+
     if (limit === -1) return 0;
     if (limit === 0) return 100;
-    
+
     return Math.min(Math.round((usage / limit) * 100), 100);
   };
 
   const hasReachedLimit = (limitType) => {
     if (!user?.usage || !user?.limits) return false;
-    
+
     switch (limitType) {
       case 'uploads':
         if (user.limits.uploadsPerMonth === -1) return false;
@@ -651,7 +638,7 @@ export const AuthProvider = ({ children }) => {
 
   const getRemainingQuota = (quotaType) => {
     if (!user?.usage || !user?.limits) return 0;
-    
+
     switch (quotaType) {
       case 'uploads':
         if (user.limits.uploadsPerMonth === -1) return 'unlimited';
@@ -684,26 +671,25 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated: !!user,
     login,
     signup,
-    loginWithGoogle,
     logout,
     clearError,
     setUser,
     updateUser,
     refreshUserData,
     fetchUsageStats,
-    
+
     // Role related - use computed values
     isAdmin: computedIsAdmin,
     isSuperAdmin: computedIsSuperAdmin,
     userRole: user?.role || 'user',
-    
+
     // Tier related
     subscriptionTier: user?.subscriptionTier || 'free',
     subscriptionStatus: user?.subscriptionStatus || 'active',
     tierConfig: getTierConfig(),
     getTierConfig,
     hasTier,
-    
+
     // Usage related
     usage: user?.usage || {},
     limits: user?.limits || {},
@@ -711,7 +697,7 @@ export const AuthProvider = ({ children }) => {
     hasReachedLimit,
     getRemainingQuota,
     isSubscriptionExpired,
-    
+
     // Tier booleans
     isFreeUser: user?.subscriptionTier === 'free',
     isStarterUser: user?.subscriptionTier === 'starter',

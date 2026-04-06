@@ -26,12 +26,3 @@
 # Build environment
 [build.environment]
   NODE_VERSION = "18"
-  # VITE_API_URL is intentionally NOT set here — it must be configured as a
-  # persistent environment variable in the Netlify dashboard (Site Settings >
-  # Environment Variables) so it survives ngrok URL changes without a redeploy.
-  VITE_FIREBASE_API_KEY = "AIzaSyDtcGw6lZJ2Nzl74z6H8TugpyzEIYT5WX0"
-  VITE_FIREBASE_AUTH_DOMAIN = "veyrax-4def7.firebaseapp.com"
-  VITE_FIREBASE_PROJECT_ID = "veyrax-4def7"
-  VITE_FIREBASE_STORAGE_BUCKET = "veyrax-4def7.firebasestorage.app"
-  VITE_FIREBASE_MESSAGING_SENDER_ID = "522811795047"
-  VITE_FIREBASE_APP_ID = "1:522811795047:web:9572b1cc72cdabf942d6c2"

@@ -90,7 +90,7 @@
 .form-input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.12);
 }
 
 .form-input.error {
@@ -142,7 +142,7 @@
   background: var(--secondary-color);
   border-color: var(--secondary-color);
   transform: translateY(-3px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 32px rgba(22, 163, 74, 0.25);
 }
 
 .auth-button:hover:not(:disabled)::after {
@@ -309,42 +309,7 @@
 
 .auth-divider span {
   padding: 0 0.85rem;
-  background: transparent;
-}
-
-/* Google Button */
-.google-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 0.8rem 1.5rem;
-  background: var(--background);
-  color: var(--text-primary);
-  border: 1.5px solid var(--border-color);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 600;
-  transition: all 0.3s var(--ease-out-expo);
-  margin-top: 0.5rem;
-  width: 100%;
-}
-
-.google-button:hover:not(:disabled) {
-  border-color: var(--primary-color);
-  background: var(--background-light);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-
-.google-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.google-button svg {
-  flex-shrink: 0;
+  background: black;
 }
 
 /* Responsive */
@@ -387,8 +352,7 @@
     font-size: 0.88rem;
   }
 
-  .auth-button,
-  .google-button {
+  .auth-button {
     padding: 0.7rem;
     font-size: 0.9rem;
   }

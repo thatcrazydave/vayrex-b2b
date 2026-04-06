@@ -193,7 +193,7 @@
 }
 
 .btn-outline {
-  background: transparent;
+  background: black;
   color: var(--text-primary);
   border-color: var(--border-color);
 }

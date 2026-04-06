@@ -1323,7 +1323,7 @@ function GenerateQuiz() {
         content: `Hey ${user?.name?.split(' ')[0] || 'there'}, what do you need clarity on? Type \`/\` to see available commands.`
       }]);
 
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
       const token = sessionStorage.getItem('authToken');
       const streamResp = await fetch(
         `${apiBase}/ai/summarize-stream/${encodeURIComponent(jobId)}`,
@@ -1736,7 +1736,7 @@ function GenerateQuiz() {
       const streamJobStatus = async (authToken, jId) => {
         clearInterval(progressInterval);
         const streamResponse = await fetch(
-          `${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/ai/job-status/stream/${encodeURIComponent(jId)}`,
+          `${import.meta.env.VITE_API_URL || 'http://localhost:5002/api'}/ai/job-status/stream/${encodeURIComponent(jId)}`,
           {
             method: 'GET',
             headers: {
@@ -1819,7 +1819,7 @@ function GenerateQuiz() {
       const submitAndStream = async (formDataPayload, progressLabel) => {
         // Fetch / refresh CSRF token
         if (!csrfTokenRef.current) {
-          const csrfResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/csrf-token`, {
+          const csrfResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5002/api'}/csrf-token`, {
             credentials: 'include',
             headers: { 'ngrok-skip-browser-warning': 'true', 'Bypass-Tunnel-Reminder': 'true' }
           });
@@ -1830,7 +1830,7 @@ function GenerateQuiz() {
         setProgress(progressLabel);
         setProgressPercent(20);
 
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/ai/generate-from-notes`, {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5002/api'}/ai/generate-from-notes`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2109,14 +2109,14 @@ function GenerateQuiz() {
             />
           ];
         }
-        
+
         // Extract display math blocks BEFORE line splitting
         const MATH_BLOCK_RE = /(\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$)/g;
         const mathSegments = seg.content.split(MATH_BLOCK_RE);
-        
+
         return mathSegments.flatMap((mSeg, mIdx) => {
           if (!mSeg) return [];
-          
+
           if (mSeg.startsWith('\\[') || mSeg.startsWith('$$')) {
              let latex = mSeg.startsWith('\\[') ? mSeg.slice(2, -2) : mSeg.slice(2, -2);
              latex = latex.trim();
@@ -2128,7 +2128,7 @@ function GenerateQuiz() {
                  return [<div key={`${baseKey}-math-${idx}-${mIdx}`} className="course-katex-display">{mSeg}</div>];
              }
           }
-          
+
           // Normal text
           const lines = mSeg.split('\n');
           // Clean up boundary newlines created by the match splitting
@@ -3231,7 +3231,7 @@ function GenerateQuiz() {
               <FaCheckCircle />
               <span style={{ flex: 1 }}>{success}</span>
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate(-1)}
                 style={{
                   padding: '8px 16px',
                   background: '#fff',

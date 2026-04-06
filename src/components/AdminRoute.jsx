@@ -24,7 +24,7 @@ const AdminRoute = ({ children }) => {
       try {
         // Make a lightweight request to admin endpoint to verify access
         const response = await api.get('/admin/verify-access');
-        
+
         if (mounted && response.data.success) {
           setBackendVerified(true);
           setVerificationError(null);
@@ -34,11 +34,11 @@ const AdminRoute = ({ children }) => {
         }
       } catch (error) {
         console.error('Admin verification failed:', error);
-        
+
         if (mounted) {
           setBackendVerified(false);
           setVerificationError(
-            error.response?.data?.error?.message || 
+            error.response?.data?.error?.message ||
             'Unable to verify admin access'
           );
         }
@@ -67,10 +67,10 @@ const AdminRoute = ({ children }) => {
   }
 
   // Check admin status using multiple sources (client-side check)
-  const hasAdminAccess = 
-    isAdmin || 
-    user?.isAdmin || 
-    user?.role === 'admin' || 
+  const hasAdminAccess =
+    isAdmin ||
+    user?.isAdmin ||
+    user?.role === 'admin' ||
     user?.role === 'superadmin';
 
   // CRITICAL: Verification complete - check results
@@ -85,9 +85,9 @@ const AdminRoute = ({ children }) => {
       error: verificationError,
       timestamp: new Date().toISOString()
     });
-    
+
     // Redirect to appropriate dashboard based on role
-    const redirectPath = user ? '/Dashboard' : '/Login';
+    const redirectPath = user ? '/' : '/Login';
     return <Navigate to={redirectPath} state={{ from: location }} replace />;
   }
 

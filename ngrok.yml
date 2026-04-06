@@ -3,14 +3,7 @@ authtoken: 38hlsHsnMkCpQqsUFc5wwJZD8uY_JBxVwbWFpg8DWNhVo4Xj
 tunnels:
   backend:
     proto: http
-    addr: 5001
-    schemes:
-      - https
-    host_header: rewrite
-    inspect: true
-  frontend:
-    proto: http
-    addr: 5173
+    addr: 5002
     schemes:
       - https
     host_header: rewrite

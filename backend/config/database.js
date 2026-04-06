@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const Logger = require('../logger');
+const mongoose = require("mongoose");
+const Logger = require("../logger");
 
 // ===== STATE =====
 let mongoConnected = false;
@@ -8,28 +8,36 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 5000;
 
 async function connectDatabase(mongoUri) {
-  if (!mongoUri) {
-    throw new Error('MONGODB_URI not provided');
+  // The B2B server resolves its database URI in this priority:
+  //   1. MONGODB_B2B_URI  — dedicated B2B database (recommended for production)
+  //   2. mongoUri arg     — value passed in by the caller (server.js)
+  //   3. Falls back to MONGODB_URI only as a last resort for local dev
+  //
+  // In production both B2B/ and tester/ deployments must use
+  const resolvedUri = process.env.MONGODB_B2B_URI || mongoUri;
+
+  if (!resolvedUri) {
+    throw new Error("No database URI found. Set MONGODB_B2B_URI in your environment.");
   }
 
   try {
-    await mongoose.connect(mongoUri, {
+    await mongoose.connect(resolvedUri, {
       maxPoolSize: 10,
       minPoolSize: 2,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      family: 4 // Use IPv4
+      family: 4, // Use IPv4
     });
 
     mongoConnected = true;
     reconnectAttempts = 0;
-    Logger.info(' MongoDB connected successfully');
-    
+    Logger.info(" MongoDB connected successfully");
+
     return true;
   } catch (err) {
-    Logger.error('  MongoDB connection failed', {
+    Logger.error("  MongoDB connection failed", {
       error: err.message,
-      uri: mongoUri.replace(/\/\/([^:]+):([^@]+)/, '//***:***')
+      uri: mongoUri.replace(/\/\/([^:]+):([^@]+)/, "//***:***"),
     });
     throw err;
   }
@@ -39,27 +47,29 @@ async function connectDatabase(mongoUri) {
  * Setup MongoDB event handlers
  */
 function setupEventHandlers() {
-  mongoose.connection.on('connected', () => {
+  mongoose.connection.on("connected", () => {
     mongoConnected = true;
     reconnectAttempts = 0;
-    Logger.info(' MongoDB connected');
+    Logger.info(" MongoDB connected");
   });
 
-  mongoose.connection.on('reconnected', () => {
+  mongoose.connection.on("reconnected", () => {
     mongoConnected = true;
     reconnectAttempts = 0;
-    Logger.info('🔄 MongoDB reconnected');
+    Logger.info("MongoDB reconnected");
   });
 
-  mongoose.connection.on('disconnected', () => {
+  mongoose.connection.on("disconnected", () => {
     mongoConnected = false;
-    Logger.error('  MongoDB disconnected');
+    Logger.error("  MongoDB disconnected");
 
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
       const delay = RECONNECT_DELAY_MS * reconnectAttempts;
 
-      Logger.info(`⏳ Reconnecting in ${delay}ms (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+      Logger.info(
+        `⏳ Reconnecting in ${delay}ms (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`,
+      );
 
       setTimeout(async () => {
         try {
@@ -68,32 +78,34 @@ function setupEventHandlers() {
             minPoolSize: 2,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
-            family: 4
+            family: 4,
           });
           mongoConnected = true;
           reconnectAttempts = 0;
-          Logger.info(' Reconnected to MongoDB');
+          Logger.info(" Reconnected to MongoDB");
         } catch (err) {
-          Logger.error('  Reconnection failed', { error: err.message });
-          
+          Logger.error("  Reconnection failed", { error: err.message });
+
           if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Logger.error('  Max reconnection attempts reached. Server will continue in degraded mode.');
+            Logger.error(
+              "  Max reconnection attempts reached. Server will continue in degraded mode.",
+            );
             // Do NOT reset reconnectAttempts — stop retrying to prevent infinite loop
             // The app will run in degraded mode until restarted
           }
         }
       }, delay);
     } else {
-      Logger.error('  Max reconnection attempts reached. Server running in degraded mode.');
+      Logger.error("  Max reconnection attempts reached. Server running in degraded mode.");
       // Do NOT reset — stop further reconnection attempts
     }
   });
 
-  mongoose.connection.on('error', (err) => {
+  mongoose.connection.on("error", (err) => {
     mongoConnected = false;
-    Logger.error('  MongoDB error', {
+    Logger.error("  MongoDB error", {
       error: err.message,
-      code: err.code
+      code: err.code,
     });
   });
 }
@@ -110,10 +122,10 @@ function isConnected() {
  */
 function getStatus() {
   const states = {
-    0: 'disconnected',
-    1: 'connected',
-    2: 'connecting',
-    3: 'disconnecting'
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
   };
 
   return {
@@ -121,7 +133,7 @@ function getStatus() {
     readyState: mongoose.connection.readyState,
     state: states[mongoose.connection.readyState],
     reconnectAttempts,
-    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
   };
 }
 
@@ -132,10 +144,10 @@ async function disconnect() {
   try {
     if (mongoose.connection.readyState === 1) {
       await mongoose.disconnect();
-      Logger.info(' MongoDB disconnected gracefully');
+      Logger.info(" MongoDB disconnected gracefully");
     }
   } catch (err) {
-    Logger.error('Error disconnecting MongoDB', { error: err.message });
+    Logger.error("Error disconnecting MongoDB", { error: err.message });
   }
 }
 
@@ -144,5 +156,5 @@ module.exports = {
   setupEventHandlers,
   isConnected,
   getStatus,
-  disconnect
+  disconnect,
 };

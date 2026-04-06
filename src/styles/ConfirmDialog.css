@@ -29,7 +29,7 @@
   position: absolute;
   top: 14px;
   right: 14px;
-  background: transparent;
+  background: black;
   border: none;
   font-size: 1.2rem;
   color: var(--text-light);

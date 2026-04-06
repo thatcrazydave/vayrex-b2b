@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  FiBarChart2, 
-  FiUsers, 
-  FiMail, 
-  FiTrendingUp, 
-  FiActivity, 
-  FiDatabase, 
+import {
+  FiBarChart2,
+  FiUsers,
+  FiMail,
+  FiTrendingUp,
+  FiActivity,
+  FiDatabase,
   FiFileText,
   FiLogOut,
   FiMenu,
@@ -29,7 +29,7 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
-  
+
   // Use AuthContext instead of localStorage
   const { user, logout, isAdmin, loading } = useAuth();
 
@@ -48,7 +48,7 @@ const AdminDashboard = () => {
   }
 
   if (!user || !isAdmin) {
-    navigate('/Dashboard');
+    navigate('/');
     return null;
   }
 
@@ -120,8 +120,8 @@ const AdminDashboard = () => {
 
             {/* Right Actions */}
             <div className="navbar-actions">
-              <button 
-                className="action-btn logout-btn" 
+              <button
+                className="action-btn logout-btn"
                 title="Logout"
                 onClick={handleLogout}
               >
@@ -130,7 +130,7 @@ const AdminDashboard = () => {
 
 
               {/* Mobile Menu Toggle */}
-              <button 
+              <button
                 className="mobile-menu-btn"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               >
@@ -159,7 +159,7 @@ const AdminDashboard = () => {
                 );
               })}
               <div className="mobile-nav-divider" />
-              <button 
+              <button
                 className="mobile-nav-item logout"
                 onClick={handleLogout}
               >

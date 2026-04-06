@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, Link, useLocation } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext.jsx";
-import { FaGoogle } from 'react-icons/fa';
+import { useNavigate, Link, useLocation, useSearchParams } from "react-router-dom";
+import { useAuth, getDashboardRoute } from "../contexts/AuthContext.jsx";
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 import { showToast } from "../utils/toast.js";
+import api from '../services/api.js';
 import "../styles/auth.css";
 
 const Login = () => {
@@ -14,17 +14,18 @@ const Login = () => {
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [showPassword, setShowPassword] = useState(false);
-  
-  const { 
-    login, 
-    loginWithGoogle, 
-    loading, 
-    error, 
-    clearError, 
-    isAuthenticated, 
-    isInitialized, 
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('inviteToken');
+
+  const {
+    login,
+    loading,
+    error,
+    clearError,
+    isAuthenticated,
+    isInitialized,
     user,
-    isAdmin 
+    isAdmin
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -32,39 +33,15 @@ const Login = () => {
   // Get the intended destination from state (if redirected from protected route)
   const from = location.state?.from?.pathname;
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated and there is a real dashboard to go to
   useEffect(() => {
     if (isAuthenticated && isInitialized && user) {
-
-      // Determine redirect destination based on role
-      let redirectTo = '/Dashboard';
-      
-      // Check if user is admin/superadmin (multiple sources for safety)
-      const userIsAdmin = isAdmin || 
-                         user.role === 'admin' || 
-                         user.role === 'superadmin' || 
-                         user.isAdmin === true;
-      
-      if (userIsAdmin) {
-        // Admin users go to admin dashboard
-        if (from && from.startsWith('/admin')) {
-          redirectTo = from; // Return to protected admin route they tried to access
-        } else {
-          redirectTo = '/admin'; // Default to admin dashboard
-        }
-      } else {
-        // Regular users go to user dashboard
-        if (from && !from.startsWith('/admin')) {
-          redirectTo = from; // Return to protected route they tried to access
-        } else {
-          redirectTo = '/Dashboard'; // Default to user dashboard
-        }
+      const redirectTo = from || getDashboardRoute(user);
+      if (redirectTo && redirectTo !== '/Login') {
+        navigate(redirectTo, { replace: true });
       }
-
-      // console.log('Login redirect:', { userIsAdmin, role: user.role, redirectTo });
-      navigate(redirectTo, { replace: true });
     }
-  }, [isAuthenticated, isInitialized, user, isAdmin, navigate, from]);
+  }, [isAuthenticated, isInitialized, user, navigate, from]);
 
   useEffect(() => {
     if (error) {
@@ -79,7 +56,7 @@ const Login = () => {
       ...prev,
       [name]: value
     }));
-    
+
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
@@ -98,7 +75,7 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Basic validation
     if (!formData.emailOrUsername.trim()) {
       setErrors(prev => ({ ...prev, emailOrUsername: 'Email or username is required' }));
@@ -110,44 +87,27 @@ const Login = () => {
     }
 
     const result = await login(formData.emailOrUsername, formData.password);
-    
+
     if (result.success) {
       const loggedInUser = result.user;
-      const userIsAdmin = result.isAdmin || loggedInUser?.isAdmin || 
-                          loggedInUser?.role === 'admin' || 
-                          loggedInUser?.role === 'superadmin';
-      
 
-      // Show tier info in toast
-      const tierEmoji = {
-        free: '🆓',
-        starter: '⭐',
-        pro: '💎'
-      }[loggedInUser?.subscriptionTier] || ' ';
-      
-      const roleLabel = userIsAdmin ? ' (Admin)' : '';
-      showToast.success(
-        `Welcome back${roleLabel}! (${(loggedInUser?.subscriptionTier || 'free').toUpperCase()} tier)`
-      );
-      
-      // Determine redirect destination
-      let redirectTo = result.redirectTo || '/Dashboard';
-      
-      if (userIsAdmin) {
-        // If coming from an admin page, go back there
-        if (from && from.startsWith('/admin')) {
-          redirectTo = from;
-        } else {
-          redirectTo = '/admin';
+      // If the user arrived via an invite link, accept the invitation now
+      if (inviteToken) {
+        try {
+          await api.post('/auth/accept-invite', { inviteToken });
+          showToast.success(`Welcome back, ${loggedInUser?.fullname || loggedInUser?.username || ''}! Invitation accepted.`);
+        } catch (inviteErr) {
+          showToast.success(`Welcome back, ${loggedInUser?.fullname || loggedInUser?.username || ''}!`);
+          showToast.warning(inviteErr.response?.data?.error?.message || 'Could not accept invitation. Please contact your admin.');
         }
       } else {
-        // Regular user
-        if (from && !from.startsWith('/admin')) {
-          redirectTo = from;
-        } else {
-          redirectTo = '/Dashboard';
-        }
+        showToast.success(
+          `Welcome back, ${loggedInUser?.fullname || loggedInUser?.username || ''}!`
+        );
       }
+
+      // Use role-based redirect or return to previous page
+      const redirectTo = from || result.redirectTo || getDashboardRoute(loggedInUser) || '/org-setup';
 
       // Navigate after a short delay for toast visibility
       setTimeout(() => {
@@ -158,45 +118,9 @@ const Login = () => {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    try {
-      showToast.info("Redirecting to Google...");
-      const result = await loginWithGoogle();
-      
-      if (result?.success) {
-        const loggedInUser = result.user;
-        const userIsAdmin = result.isAdmin || loggedInUser?.isAdmin || 
-                            loggedInUser?.role === 'admin' || 
-                            loggedInUser?.role === 'superadmin';
-
-        // Determine redirect
-        let redirectTo = result.redirectTo || '/Dashboard';
-        
-        if (userIsAdmin) {
-          if (from && from.startsWith('/admin')) {
-            redirectTo = from;
-          } else {
-            redirectTo = '/admin';
-          }
-        } else {
-          if (from && !from.startsWith('/admin')) {
-            redirectTo = from;
-          } else {
-            redirectTo = '/Dashboard';
-          }
-        }
-
-        showToast.success('Welcome!');
-        navigate(redirectTo, { replace: true });
-      }
-    } catch (err) {
-      console.error('Google login error:', err);
-      showToast.error("Google login failed. Please try again.");
-    }
-  };
-
-  // Don't render login form if already authenticated (prevents flash)
-  if (isAuthenticated && isInitialized) {
+  // Block login form only when there is a real dashboard to redirect to
+  const dashboardRoute = isAuthenticated && isInitialized && user ? (from || getDashboardRoute(user)) : null;
+  if (dashboardRoute && dashboardRoute !== '/Login') {
     return (
       <div className="auth-container">
         <div className="auth-card" style={{ textAlign: 'center', padding: '2rem' }}>
@@ -214,7 +138,7 @@ const Login = () => {
           <h2>Welcome Back</h2>
           <p className="auth-subtitle">Sign in to your account</p>
         </div>
-        
+
         <form onSubmit={handleSubmit} className="auth-form" autoComplete="off" noValidate>
           <div className="form-group">
             <input
@@ -266,8 +190,8 @@ const Login = () => {
             )}
           </div>
 
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="auth-button"
             disabled={loading}
           >
@@ -281,24 +205,10 @@ const Login = () => {
             )}
           </button>
 
-          <div className="auth-divider">
-            <span>or</span>
-          </div>
-
-          <button 
-            type="button" 
-            className="google-button"
-            onClick={handleGoogleLogin}
-            disabled={loading}
-          >
-            <FaGoogle />
-            Continue with Google
-          </button>
-
           <p className="auth-link">
-            Don't have an account? <Link to="/Signup">Sign up</Link>
+            Don't have an account? <Link to="/org-signup">Register your school</Link>
           </p>
-          
+
           <p className="auth-link">
             <Link to="/forgot-password">Forgot your password?</Link>
           </p>

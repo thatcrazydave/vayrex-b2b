@@ -3,7 +3,7 @@ import { getErrorMessage, CRITICAL_ERRORS } from "../utils/errorHandler";
 import { showToast } from "../utils/toast";
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5001/api",
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5002/api",
   timeout: 60000, // 60 second default timeout
   withCredentials: true, // Required for CSRF cookie validation
   headers: {
@@ -33,7 +33,7 @@ const getCsrfToken = async (force = false) => {
 
   // Fetch new token (no cookies/credentials needed for stateless CSRF)
   csrfPromise = axios
-    .get(`${import.meta.env.VITE_API_URL || "http://localhost:5001/api"}/csrf-token`, {
+    .get(`${import.meta.env.VITE_API_URL || "http://localhost:5002/api"}/csrf-token`, {
       withCredentials: true,
       headers: {
         "Bypass-Tunnel-Reminder": "true",
@@ -245,7 +245,7 @@ API.interceptors.response.use(
         }
 
         const refreshResponse = await axios.post(
-          `${import.meta.env.VITE_API_URL || "http://localhost:5001/api"}/auth/refresh`,
+          `${import.meta.env.VITE_API_URL || "http://localhost:5002/api"}/auth/refresh`,
           { refreshToken },
           { withCredentials: false },
         );
@@ -611,7 +611,7 @@ export function subscribeToCourseOutlineStream(
 ) {
   const controller = new AbortController();
   const token = sessionStorage.getItem("authToken");
-  const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+  const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5002/api";
 
   fetch(`${baseURL}/ai/summarize-stream/${encodeURIComponent(jobId)}`, {
     method: "GET",
@@ -638,7 +638,7 @@ export function subscribeToCourseOutlineStream(
         try {
           ({ value, done } = await reader.read());
         } catch (readErr) {
-          if (readErr.name !== 'AbortError') onError?.(readErr.message || 'Stream read error');
+          if (readErr.name !== "AbortError") onError?.(readErr.message || "Stream read error");
           break;
         }
         if (done) break;

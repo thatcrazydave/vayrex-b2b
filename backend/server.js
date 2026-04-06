@@ -18,13 +18,8 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const {
-  S3Client,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-  GetObjectCommand,
-} = require("@aws-sdk/client-s3");
+// B2B: AWS SDK S3 imports removed — using Supabase via storageService
+// Legacy references kept as comments for migration traceability
 const mime = require("mime-types");
 const { createOpenAIClient } = require("./openaiClient");
 const aiService = require("./services/aiService");
@@ -37,7 +32,7 @@ const {
 } = require("./services/taskQueue");
 require("./workers/quizWorker");
 require("./scheduler"); // Start all cron jobs (daily reset, monthly reset, health checks, etc.)
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+// B2B: S3 presigner removed — signed URLs handled by storageService
 const Logger = require("./logger");
 const ErrorCodes = require("./errorCodes");
 const errorHandler = require("./middleware/errorHandler");
@@ -68,6 +63,23 @@ const {
 
 const adminRoutes = require("./routes/admin");
 const authRoutes = require("./routes/auth");
+const onboardingRoutes = require("./routes/onboarding");
+const orgRoutes = require("./routes/org");
+const gradebookRoutes = require("./routes/gradebook");
+const reportCardRoutes = require("./routes/reportCards");
+const assignmentRoutes = require("./routes/assignments");
+const attendanceRoutes = require("./routes/attendance");
+const announcementRoutes = require("./routes/announcements");
+const guardianRoutes = require("./routes/guardian");
+
+// B2B: pre-load org models so Mongoose registers them before any route uses them
+require("./models/Organization");
+require("./models/AcademicYear");
+require("./models/Term");
+require("./models/Classroom");
+require("./models/Subject");
+require("./models/SubjectAssignment");
+require("./models/Invitation");
 
 const { rateLimiter, createEndpointLimiter } = require("./middleware/rateLimiter");
 const {
@@ -107,6 +119,8 @@ const {
   trackTokenUsage,
   checkTokenLimit,
 } = require("./middleware/auth");
+
+const { denyITAdminAcademic } = require("./middleware/orgAuth");
 
 const Result = require("./models/result");
 const Question = require("./models/questions");
@@ -148,12 +162,10 @@ app.use((req, res, next) => {
   req.setTimeout(timeout);
   res.setTimeout(timeout, () => {
     if (!res.headersSent) {
-      res
-        .status(408)
-        .json({
-          success: false,
-          error: { code: "REQUEST_TIMEOUT", message: "Request timed out. Please try again." },
-        });
+      res.status(408).json({
+        success: false,
+        error: { code: "REQUEST_TIMEOUT", message: "Request timed out. Please try again." },
+      });
     }
   });
   next();
@@ -177,8 +189,6 @@ app.use(
         fontSrc: ["'self'", "data:"],
         connectSrc: [
           "'self'",
-          "https://identitytoolkit.googleapis.com",
-          "https://securetoken.googleapis.com",
           ...(process.env.NODE_ENV !== "production" ? ["http://localhost:*"] : []),
         ],
         frameSrc: ["'none'"],
@@ -301,6 +311,12 @@ const BANNED_BODY_FIELDS = [
   "__proto__",
   "constructor",
   "prototype",
+  // B2B: users must never self-assign org membership or escalate org role
+  "organizationId",
+  "orgId",
+  "orgRole",
+  "seatAssignedAt",
+  "guardianOf",
 ];
 app.use((req, res, next) => {
   if (!req.body || typeof req.body !== "object") return next();
@@ -416,19 +432,10 @@ function ensureObjectId(userId) {
   return userId;
 }
 
-// Add COOP/COEP headers in development to support Firebase popup UX
-if (process.env.NODE_ENV !== "production") {
-  app.use((req, res, next) => {
-    res.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
-    res.header("Cross-Origin-Embedder-Policy", "unsafe-none");
-    next();
-  });
-}
-
 // ===== CORS =====
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ||
-  "http://localhost:5173,http://localhost:5174,https://vayrex.netlify.app"
+  "http://localhost:5173,http://localhost:5174,https://schools-vayrex.netlify.app"
 )
   .split(",")
   .map((s) => s.trim());
@@ -493,10 +500,6 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  // Skip JSON parsing for Paystack webhook (needs raw body for signature verification)
-  if (req.path === "/api/paystack/webhook") {
-    return next();
-  }
   // 1mb body size cap — prevents memory exhaustion from oversized JSON payloads (DDoS)
   express.json({ limit: "1mb" })(req, res, next);
 });
@@ -951,11 +954,6 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // Skip CSRF for Paystack webhooks (verified via HMAC signature instead)
-  if (req.path === "/api/paystack/webhook") {
-    return next();
-  }
-
   // Skip CSRF for refresh token exchange (uses refresh token in body, not cookies)
   if (req.path === "/api/auth/refresh") {
     return next();
@@ -1009,8 +1007,83 @@ app.use(identifyUser);
 app.use(rateLimiter);
 
 // ===== REGISTER ROUTES AFTER CSRF AND RATE LIMIT MIDDLEWARE =====
+
+// B2B: Deny IT admins access to academic endpoints
+// This runs AFTER authenticateToken on each route and blocks IT admins from
+// viewing grades, questions, quiz results, notes, and AI features.
+const academicPaths = [
+  "/api/questions",
+  "/api/topics",
+  "/api/user/quiz",
+  "/api/user/submit-exam",
+  "/api/results",
+  "/api/user/uploads",
+  "/api/notes",
+  "/api/ai",
+  "/api/export",
+  "/api/upload",
+];
+for (const p of academicPaths) {
+  app.use(p, (req, res, next) => {
+    // Only enforce if user is authenticated (authenticateToken sets req.user)
+    if (req.user && req.user.orgRole === "it_admin") {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "IT_ADMIN_ACADEMIC_DENIED",
+          message: "IT administrators do not have access to academic data",
+        },
+      });
+    }
+    next();
+  });
+}
+
+// B2B: Teacher-only content-creation gates
+// Upload, AI generation, notes, and export routes are restricted to
+// teacher / owner / org_admin in the B2B context.
+// Students and guardians cannot create content — only consume it.
+const teacherOnlyPaths = [
+  "/api/upload",
+  "/api/ai",
+  "/api/notes",
+  "/api/export",
+];
+const teacherAllowedRoles = ["teacher", "owner", "org_admin"];
+for (const p of teacherOnlyPaths) {
+  app.use(p, (req, res, next) => {
+    // Only enforce for org members (B2B users have orgRole)
+    if (req.user && req.user.orgRole && !teacherAllowedRoles.includes(req.user.orgRole)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "TEACHER_ONLY",
+          message: "This feature is only available to teachers",
+        },
+      });
+    }
+    next();
+  });
+}
+
 app.use("/api/auth", checkDatabaseHealth);
 app.use("/api/auth", authRoutes);
+app.use("/api/onboarding/org", checkDatabaseHealth);
+app.use("/api/onboarding/org", onboardingRoutes);
+app.use("/api/org/:orgId", checkDatabaseHealth);
+app.use("/api/org/:orgId", orgRoutes);
+app.use("/api/org/:orgId/gradebook", checkDatabaseHealth);
+app.use("/api/org/:orgId/gradebook", gradebookRoutes);
+app.use("/api/org/:orgId/report-cards", checkDatabaseHealth);
+app.use("/api/org/:orgId/report-cards", reportCardRoutes);
+app.use("/api/org/:orgId/assignments", checkDatabaseHealth);
+app.use("/api/org/:orgId/assignments", assignmentRoutes);
+app.use("/api/org/:orgId/attendance", checkDatabaseHealth);
+app.use("/api/org/:orgId/attendance", attendanceRoutes);
+app.use("/api/org/:orgId/announcements", checkDatabaseHealth);
+app.use("/api/org/:orgId/announcements", announcementRoutes);
+app.use("/api/org/:orgId/guardian", checkDatabaseHealth);
+app.use("/api/org/:orgId/guardian", guardianRoutes);
 app.use("/api/admin", checkDatabaseHealth);
 app.use("/api/upload", checkDatabaseHealth);
 app.use("/api/user", checkDatabaseHealth);
@@ -1042,7 +1115,9 @@ app.use("/api/admin", adminRateLimiter, adminRoutes);
 
 (async () => {
   try {
-    const MONGO_URI = process.env.MONGODB_URI;
+    // MONGODB_B2B_URI takes priority over MONGODB_URI (see config/database.js).
+    // The B2B deployment must point to a dedicated database, not the B2C one.
+    const MONGO_URI = process.env.MONGODB_B2B_URI || process.env.MONGODB_URI;
     await connectDatabase(MONGO_URI);
     setupEventHandlers();
     Logger.info("MongoDB initialization complete");
@@ -1133,52 +1208,34 @@ app.use((err, req, res, next) => {
   });
 });
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+// B2B: Supabase Storage replaces AWS S3 for file operations.
+// All storage calls go through the storageService abstraction.
+const storageService = require("./services/storageService");
 
-const S3_BUCKET = process.env.S3_BUCKET_NAME;
-
-//   Helper to upload any buffer directly to S3 and return public URL
-async function uploadToS3(fileBuffer, fileName, mimeType, userId) {
-  if (!S3_BUCKET) throw new Error("S3 bucket name missing in .env");
-  const Key = `uploads/${userId}/${Date.now()}_${fileName}`;
-
-  const command = new PutObjectCommand({
-    Bucket: S3_BUCKET,
-    Key: Key,
-    Body: fileBuffer,
-    ContentType: mimeType || "application/octet-stream",
-  });
-
-  const result = await s3Client.send(command);
-
-  return {
-    Key,
-    url: `https://${S3_BUCKET}.s3.amazonaws.com/${Key}`,
-  };
+// Backwards-compatible helper: upload buffer and return path + URL
+async function uploadToStorage(fileBuffer, fileName, mimeType, userId, orgId) {
+  const relativePath = `uploads/${userId}/${Date.now()}_${fileName}`;
+  const { path, publicUrl } = await storageService.upload(
+    fileBuffer,
+    relativePath,
+    mimeType || "application/octet-stream",
+    orgId || null,
+    userId,
+  );
+  return { Key: path, url: publicUrl };
 }
 
-async function saveBackupToS3(userId, topic, questions) {
-  const backupKey = `question_backups/${userId}/${topic}_${Date.now()}.json`;
-
-  const command = new PutObjectCommand({
-    Bucket: S3_BUCKET,
-    Key: backupKey,
-    Body: JSON.stringify(questions, null, 2),
-    ContentType: "application/json",
-  });
-
-  const result = await s3Client.send(command);
-
-  return {
-    backupKey,
-    backupUrl: `https://${S3_BUCKET}.s3.amazonaws.com/${backupKey}`,
-  };
+async function saveBackupToStorage(userId, topic, questions, orgId) {
+  const relativePath = `question_backups/${userId}/${topic}_${Date.now()}.json`;
+  const buffer = Buffer.from(JSON.stringify(questions, null, 2));
+  const { path, publicUrl } = await storageService.upload(
+    buffer,
+    relativePath,
+    "application/json",
+    orgId || null,
+    userId,
+  );
+  return { backupKey: path, backupUrl: publicUrl };
 }
 
 app.use((req, res, next) => {
@@ -1189,86 +1246,18 @@ app.use((req, res, next) => {
   next();
 });
 
-async function getSignedS3Url(Key, expirationSeconds = 1800) {
+async function getSignedStorageUrl(Key, orgId, expirationSeconds = 1800) {
   try {
-    const command = new GetObjectCommand({
-      Bucket: S3_BUCKET,
-      Key,
-    });
-
-    const url = await getSignedUrl(s3Client, command, {
-      expiresIn: expirationSeconds,
-    });
-    return url;
+    // The Key may already be fully qualified (orgs/xxx/...) from older code paths.
+    // storageService.getSignedDownloadUrl expects a relative path + orgId,
+    // so if Key already starts with "orgs/" we pass orgId as null (path is absolute).
+    if (Key.startsWith("orgs/")) {
+      return await storageService.getSignedDownloadUrl(Key, null, expirationSeconds);
+    }
+    return await storageService.getSignedDownloadUrl(Key, orgId, expirationSeconds);
   } catch (err) {
     console.error("Error generating signed URL:", err);
     return null;
-  }
-}
-
-// ===== Firebase Admin SDK Initialization =====
-const admin = require("firebase-admin");
-
-try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    Logger.info("  Firebase Admin SDK initialized from environment variable");
-  } else if (
-    fs.existsSync("./serviceAccountKey.json") &&
-    process.env.NODE_ENV !== "production"
-  ) {
-    const serviceAccount = require("./serviceAccountKey.json");
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    Logger.warn("  Using local serviceAccountKey.json (development only)");
-  } else {
-    throw new Error("FIREBASE_SERVICE_ACCOUNT not set");
-  }
-} catch (err) {
-  Logger.warn("  Firebase Admin SDK initialization failed", { error: err.message });
-  Logger.warn("Firebase authentication will be disabled");
-}
-
-// ===== Firebase Token Verification (Admin SDK) =====
-async function verifyFirebaseToken(token) {
-  try {
-    if (!token || typeof token !== "string") {
-      throw new Error("Invalid token format");
-    }
-    const decodedToken = await admin.auth().verifyIdToken(token, true);
-
-    if (!decodedToken.uid) {
-      throw new Error("Invalid token: missing User ID");
-    }
-    if (!decodedToken.email) {
-      throw new Error("Invalid token:missing email");
-    }
-
-    Logger.info("Firebase Token verified successfully", {
-      uid: decodedToken.uid,
-      email: decodedToken.email,
-      iss: decodedToken.iss,
-    });
-
-    return {
-      uid: decodedToken.uid,
-      email: decodedToken.email,
-      name: decodedToken.name || "",
-      iat: decodedToken.iat,
-      exp: decodedToken.exp,
-      email_verified: decodedToken.email_verified || false,
-    };
-  } catch (err) {
-    Logger.error("Firebase token verification failed", {
-      error: err.message,
-      code: err.code,
-      errorDetails: err.toString(),
-    });
-    throw new Error(`Invalid token: ${err.message}`);
   }
 }
 
@@ -1474,10 +1463,12 @@ app.post(
       }
 
       // Parallelize S3 upload, DB insert, and backup for faster processing
+      // B2B: org-scoped storage upload via Supabase
+      const orgId = req.user.organizationId || null;
       const [s3Result, dbResult, backupResult] = await Promise.allSettled([
-        uploadToS3(fileBuffer, fileName, file.mimetype, req.user.id),
+        uploadToStorage(fileBuffer, fileName, file.mimetype, req.user.id, orgId),
         Question.insertMany(questions),
-        saveBackupToS3(req.user.id, topic, questions),
+        saveBackupToStorage(req.user.id, topic, questions, orgId),
       ]);
 
       // Handle S3 upload result
@@ -1587,11 +1578,11 @@ app.delete("/api/uploads/id/:id", authenticateToken, async (req, res) => {
     const s3Keys = [upload.s3FileKey, upload.s3BundleKey, upload.s3BackupKey].filter(Boolean);
     await Promise.allSettled(
       s3Keys.map((key) =>
-        s3Client
-          .send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }))
-          .then(() => Logger.info("S3 object deleted", { key }))
+        storageService
+          .remove(key, null)
+          .then(() => Logger.info("Storage object deleted", { key }))
           .catch((err) =>
-            Logger.warn("S3 delete failed (non-critical)", { key, error: err.message }),
+            Logger.warn("Storage delete failed (non-critical)", { key, error: err.message }),
           ),
       ),
     );
@@ -1769,15 +1760,10 @@ app.delete("/api/uploads/:topic", authenticateToken, async (req, res) => {
       // Delete main file
       if (upload.s3FileKey) {
         try {
-          await s3Client.send(
-            new DeleteObjectCommand({
-              Bucket: S3_BUCKET,
-              Key: upload.s3FileKey,
-            }),
-          );
-          Logger.info("S3 file deleted", { key: upload.s3FileKey });
+          await storageService.remove(upload.s3FileKey, null);
+          Logger.info("Storage file deleted", { key: upload.s3FileKey });
         } catch (s3Err) {
-          Logger.warn("Failed to delete S3 file", {
+          Logger.warn("Failed to delete storage file", {
             key: upload.s3FileKey,
             error: s3Err.message,
           });
@@ -1788,15 +1774,10 @@ app.delete("/api/uploads/:topic", authenticateToken, async (req, res) => {
       // Delete backup file
       if (upload.s3BackupKey) {
         try {
-          await s3Client.send(
-            new DeleteObjectCommand({
-              Bucket: S3_BUCKET,
-              Key: upload.s3BackupKey,
-            }),
-          );
-          Logger.info("S3 backup deleted", { key: upload.s3BackupKey });
+          await storageService.remove(upload.s3BackupKey, null);
+          Logger.info("Storage backup deleted", { key: upload.s3BackupKey });
         } catch (s3Err) {
-          Logger.warn("Failed to delete S3 backup", {
+          Logger.warn("Failed to delete storage backup", {
             key: upload.s3BackupKey,
             error: s3Err.message,
           });
@@ -1889,21 +1870,17 @@ app.delete("/api/uploads/:topic/:filename", authenticateToken, async (req, res) 
     const { topic, filename } = req.params;
 
     if (!topic || !filename) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "MISSING_PARAMS", message: "Topic and filename are required" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "MISSING_PARAMS", message: "Topic and filename are required" },
+      });
     }
 
     if (typeof topic !== "string" || typeof filename !== "string") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "INVALID_PARAMS", message: "Parameters must be strings" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_PARAMS", message: "Parameters must be strings" },
+      });
     }
 
     const sanitizedTopic = topic.trim().toLowerCase();
@@ -1917,12 +1894,10 @@ app.delete("/api/uploads/:topic/:filename", authenticateToken, async (req, res) 
     });
 
     if (!upload) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "FILE_NOT_FOUND", message: "File not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "FILE_NOT_FOUND", message: "File not found" },
+      });
     }
 
     // Delete from S3
@@ -1931,10 +1906,10 @@ app.delete("/api/uploads/:topic/:filename", authenticateToken, async (req, res) 
 
     for (const key of keysToDelete) {
       try {
-        await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+        await storageService.remove(key, null);
       } catch (s3Err) {
         s3Errors.push(key);
-        Logger.warn("S3 delete failed for single file", { key, error: s3Err.message });
+        Logger.warn("Storage delete failed for single file", { key, error: s3Err.message });
       }
     }
 
@@ -1972,12 +1947,10 @@ app.delete("/api/uploads/:topic/:filename", authenticateToken, async (req, res) 
     });
   } catch (error) {
     Logger.error("Delete single file error", { error: error.message, userId: req.user?.id });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "DELETE_FILE_ERROR", message: "Failed to delete file" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "DELETE_FILE_ERROR", message: "Failed to delete file" },
+    });
   }
 });
 
@@ -1990,12 +1963,10 @@ app.post("/api/upload/bulk", authenticateToken, checkUploadLimit, async (req, re
     const { topic } = req.body;
 
     if (!topic || typeof topic !== "string" || topic.trim().length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "MISSING_TOPIC", message: "Topic is required" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "MISSING_TOPIC", message: "Topic is required" },
+      });
     }
 
     if (!req.files || Object.keys(req.files).length === 0) {
@@ -2006,12 +1977,10 @@ app.post("/api/upload/bulk", authenticateToken, checkUploadLimit, async (req, re
 
     const user = await User.findById(userId);
     if (!user) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "USER_NOT_FOUND", message: "User not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
     }
 
     // Normalize files to array
@@ -2071,16 +2040,7 @@ app.post("/api/upload/bulk", authenticateToken, checkUploadLimit, async (req, re
           continue;
         }
 
-        // Upload to S3
-        const s3Key = `uploads/${userId}/${sanitizedTopic}/${Date.now()}_${file.name}`;
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: S3_BUCKET,
-            Key: s3Key,
-            Body: file.data,
-            ContentType: file.mimetype,
-          }),
-        );
+        // Upload to Supabase storage\n        const s3Key = `uploads/${userId}/${sanitizedTopic}/${Date.now()}_${file.name}`;\n        const { path: uploadedPath } = await storageService.upload(\n          file.data,\n          s3Key,\n          file.mimetype,\n          req.user.organizationId || null,\n          userId,\n        );
 
         // Parse questions from text
         const questions = await parseQuestionsFromText(text);
@@ -2172,12 +2132,10 @@ app.post("/api/upload/bulk", authenticateToken, checkUploadLimit, async (req, re
     });
   } catch (err) {
     Logger.error("Bulk upload error", { error: err.message, stack: err.stack });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "BULK_UPLOAD_ERROR", message: "Failed to process bulk upload" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "BULK_UPLOAD_ERROR", message: "Failed to process bulk upload" },
+    });
   }
 });
 
@@ -2189,21 +2147,17 @@ app.get("/api/upload/bulk/:jobId", authenticateToken, async (req, res) => {
       userId: req.user.id,
     }).lean();
     if (!job) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "JOB_NOT_FOUND", message: "Upload job not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "JOB_NOT_FOUND", message: "Upload job not found" },
+      });
     }
     res.json({ success: true, data: job });
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "SERVER_ERROR", message: "Failed to fetch job status" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "SERVER_ERROR", message: "Failed to fetch job status" },
+    });
   }
 });
 
@@ -2238,12 +2192,10 @@ app.post("/api/export/pdf", authenticateToken, async (req, res) => {
     const user = await User.findById(userId);
 
     if (!user) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "USER_NOT_FOUND", message: "User not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
     }
 
     // Tier check: pdfExport is true for starter and pro tiers
@@ -2269,12 +2221,10 @@ app.post("/api/export/pdf", authenticateToken, async (req, res) => {
     } = req.body;
 
     if (!topic || typeof topic !== "string") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "MISSING_TOPIC", message: "Topic is required" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "MISSING_TOPIC", message: "Topic is required" },
+      });
     }
 
     // Validate fontSize (8-18 range)
@@ -2330,12 +2280,10 @@ app.post("/api/export/pdf", authenticateToken, async (req, res) => {
     Logger.info("PDF exported", { userId, topic, questionCount: questions.length, format });
   } catch (err) {
     Logger.error("PDF export error", { error: err.message, stack: err.stack });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "PDF_EXPORT_ERROR", message: "Failed to generate PDF" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "PDF_EXPORT_ERROR", message: "Failed to generate PDF" },
+    });
   }
 });
 
@@ -2346,12 +2294,10 @@ app.post("/api/notes/summarize", authenticateToken, async (req, res) => {
     const user = await User.findById(userId);
 
     if (!user) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "USER_NOT_FOUND", message: "User not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
     }
 
     // Tier check: noteSummary is true for starter and pro tiers
@@ -2380,24 +2326,20 @@ app.post("/api/notes/summarize", authenticateToken, async (req, res) => {
     } else if (req.body.text && typeof req.body.text === "string") {
       text = req.body.text;
     } else {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "NO_CONTENT", message: "Provide a file or text to summarize" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "NO_CONTENT", message: "Provide a file or text to summarize" },
+      });
     }
 
     if (!text || text.trim().length < 50) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: {
-            code: "INSUFFICIENT_TEXT",
-            message: "Text is too short to summarize (minimum 50 characters)",
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "INSUFFICIENT_TEXT",
+          message: "Text is too short to summarize (minimum 50 characters)",
+        },
+      });
     }
 
     // Local NLP summarization (no AI cost)
@@ -2421,12 +2363,10 @@ app.post("/api/notes/summarize", authenticateToken, async (req, res) => {
     });
   } catch (err) {
     Logger.error("Note summarization error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "SUMMARIZE_ERROR", message: "Failed to summarize notes" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "SUMMARIZE_ERROR", message: "Failed to summarize notes" },
+    });
   }
 });
 
@@ -2647,29 +2587,24 @@ app.post(
 //   POST /api/ai/summary-sessions/:sessionId/quick-check — 5-question comprehension quiz
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Helper: upload summary source file to S3
-async function _uploadSummaryFileToS3(userId, fileBuffer, fileName) {
-  if (!S3_BUCKET) return null;
+// Helper: upload summary source file to Supabase storage
+async function _uploadSummaryFileToStorage(userId, fileBuffer, fileName, orgId) {
   const ext = (fileName.match(/\.[^.]+$/) || [".bin"])[0];
-  const Key = `summary-sources/${userId}/${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
-  await s3Client.send(
-    new PutObjectCommand({
-      Bucket: S3_BUCKET,
-      Key,
-      Body: fileBuffer,
-      ContentType: "application/octet-stream",
-    }),
+  const relativePath = `summary-sources/${userId}/${Date.now()}_${crypto.randomUUID().slice(0, 8)}${ext}`;
+  const { path } = await storageService.upload(
+    fileBuffer,
+    relativePath,
+    "application/octet-stream",
+    orgId || null,
+    userId,
   );
-  return Key;
+  return path;
 }
 
-// Helper: download summary source file from S3
-async function _downloadSummaryFileFromS3(s3Key) {
-  const cmd = new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key });
-  const resp = await s3Client.send(cmd);
-  const chunks = [];
-  for await (const chunk of resp.Body) chunks.push(chunk);
-  return Buffer.concat(chunks);
+// Helper: download summary source file from Supabase storage
+async function _downloadSummaryFileFromStorage(storagePath) {
+  const { buffer } = await storageService.download(storagePath, null);
+  return buffer;
 }
 
 app.post(
@@ -2681,12 +2616,10 @@ app.post(
     try {
       const user = await User.findById(req.user.id);
       if (!user) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: "USER_NOT_FOUND", message: "User not found" },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: "USER_NOT_FOUND", message: "User not found" },
+        });
       }
       if (!user.limits?.noteSummary) {
         return res.status(403).json({
@@ -2810,9 +2743,14 @@ app.post(
       // ── Upload source file(s) to S3 ──
       let s3Key = null;
       try {
-        s3Key = await _uploadSummaryFileToS3(req.user.id, rawContent, fileName);
+        s3Key = await _uploadSummaryFileToStorage(
+          req.user.id,
+          rawContent,
+          fileName,
+          req.user.organizationId,
+        );
       } catch (s3Err) {
-        Logger.warn("summarize-start: S3 upload failed, continuing without S3", {
+        Logger.warn("summarize-start: Storage upload failed, continuing without storage", {
           error: s3Err.message,
         });
       }
@@ -3023,12 +2961,10 @@ app.put("/api/ai/summary-sessions/:id/chat", authenticateToken, async (req, res)
   try {
     const { messages } = req.body; // array of { role, content }
     if (!Array.isArray(messages) || messages.length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "INVALID", message: "messages array required" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID", message: "messages array required" },
+      });
     }
     // Sanitise and push
     const toAdd = messages.map((m) => ({
@@ -3077,12 +3013,10 @@ app.put("/api/ai/summary-sessions/:id/annotations", authenticateToken, async (re
       update.highlights = highlights;
     if (userNotes !== undefined && typeof userNotes === "object") update.userNotes = userNotes;
     if (Object.keys(update).length === 0) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "INVALID", message: "highlights or userNotes object required" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID", message: "highlights or userNotes object required" },
+      });
     }
     await SummarySession.updateOne(
       { _id: req.params.id, userId: req.user.id },
@@ -3110,9 +3044,7 @@ app.delete("/api/ai/summary-sessions/:id", authenticateToken, async (req, res) =
         .json({ success: false, error: { code: "NOT_FOUND", message: "Session not found" } });
     // Clean up S3 file (fire-and-forget)
     if (session.s3Key) {
-      s3Client
-        .send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: session.s3Key }))
-        .catch(() => {});
+      storageService.remove(session.s3Key, null).catch(() => {});
     }
     res.json({ success: true });
   } catch (err) {
@@ -3139,12 +3071,10 @@ app.post(
     try {
       const user = await User.findById(req.user.id);
       if (!user) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: "USER_NOT_FOUND", message: "User not found" },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: "USER_NOT_FOUND", message: "User not found" },
+        });
       }
       if (!user.limits?.noteSummary) {
         return res.status(403).json({
@@ -3303,15 +3233,13 @@ app.post(
       });
     } catch (err) {
       Logger.error("course-outline/parse error", { error: err.message, stack: err.stack });
-      res
-        .status(500)
-        .json({
-          success: false,
-          error: {
-            code: "SERVER_ERROR",
-            message: "An internal error occurred. Please try again.",
-          },
-        });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "SERVER_ERROR",
+          message: "An internal error occurred. Please try again.",
+        },
+      });
     }
   },
 );
@@ -3326,12 +3254,10 @@ app.post(
     try {
       const user = await User.findById(req.user.id);
       if (!user) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: "USER_NOT_FOUND", message: "User not found" },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: "USER_NOT_FOUND", message: "User not found" },
+        });
       }
       if (!user.limits?.noteSummary) {
         return res.status(403).json({
@@ -3550,15 +3476,13 @@ app.post(
       });
     } catch (err) {
       Logger.error("course-outline/generate error", { error: err.message });
-      res
-        .status(500)
-        .json({
-          success: false,
-          error: {
-            code: "SERVER_ERROR",
-            message: "An internal error occurred. Please try again.",
-          },
-        });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "SERVER_ERROR",
+          message: "An internal error occurred. Please try again.",
+        },
+      });
     }
   },
 );
@@ -3567,12 +3491,10 @@ app.post(
 app.post("/api/ai/course-outline/:sessionId/export", authenticateToken, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.sessionId)) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "INVALID_ID", message: "Invalid session ID format." },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_ID", message: "Invalid session ID format." },
+      });
     }
 
     const session = await SummarySession.findOne({
@@ -3628,15 +3550,13 @@ app.post("/api/ai/course-outline/:sessionId/export", authenticateToken, async (r
     });
   } catch (err) {
     Logger.error("course-outline export error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: {
-          code: "SERVER_ERROR",
-          message: "An internal error occurred. Please try again.",
-        },
-      });
+    res.status(500).json({
+      success: false,
+      error: {
+        code: "SERVER_ERROR",
+        message: "An internal error occurred. Please try again.",
+      },
+    });
   }
 });
 
@@ -3644,12 +3564,10 @@ app.post("/api/ai/course-outline/:sessionId/export", authenticateToken, async (r
 app.post("/api/ai/summary/:sessionId/export", authenticateToken, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.sessionId)) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "INVALID_ID", message: "Invalid session ID format." },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "INVALID_ID", message: "Invalid session ID format." },
+      });
     }
 
     const session = await SummarySession.findOne({
@@ -3691,7 +3609,7 @@ app.post("/api/ai/summary/:sessionId/export", authenticateToken, async (req, res
 
     if (session.s3Key && (isPptx || isPdf || isDocx || isImage)) {
       try {
-        const fileBuffer = await _downloadSummaryFileFromS3(session.s3Key);
+        const fileBuffer = await _downloadSummaryFileFromStorage(session.s3Key);
 
         if (isPptx) {
           const pptxResult = await parsePptx(fileBuffer, { includeImageBuffers: true });
@@ -3825,15 +3743,13 @@ app.post("/api/ai/summary/:sessionId/export", authenticateToken, async (req, res
     });
   } catch (err) {
     Logger.error("summary export error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: {
-          code: "SERVER_ERROR",
-          message: "An internal error occurred. Please try again.",
-        },
-      });
+    res.status(500).json({
+      success: false,
+      error: {
+        code: "SERVER_ERROR",
+        message: "An internal error occurred. Please try again.",
+      },
+    });
   }
 });
 
@@ -3846,12 +3762,10 @@ app.post(
   async (req, res) => {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.params.sessionId)) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: { code: "INVALID_ID", message: "Invalid session ID format." },
-          });
+        return res.status(400).json({
+          success: false,
+          error: { code: "INVALID_ID", message: "Invalid session ID format." },
+        });
       }
 
       const session = await SummarySession.findOne({
@@ -3949,15 +3863,13 @@ app.post(
       });
     } catch (err) {
       Logger.error("course-outline/retry error", { error: err.message });
-      res
-        .status(500)
-        .json({
-          success: false,
-          error: {
-            code: "SERVER_ERROR",
-            message: "An internal error occurred. Please try again.",
-          },
-        });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "SERVER_ERROR",
+          message: "An internal error occurred. Please try again.",
+        },
+      });
     }
   },
 );
@@ -3975,22 +3887,18 @@ app.post(
         userId: req.user.id,
       }).lean();
       if (!session)
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: "NOT_FOUND", message: "Session not found" },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Session not found" },
+        });
       if (!session.s3Key) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: {
-              code: "NO_FILE",
-              message: "Original source file not available for quiz generation.",
-            },
-          });
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "NO_FILE",
+            message: "Original source file not available for quiz generation.",
+          },
+        });
       }
 
       const { numberOfQuestions = 10, difficulty = "medium" } = req.body;
@@ -4000,17 +3908,15 @@ app.post(
       // Fetch file from S3
       let fileBuffer;
       try {
-        fileBuffer = await _downloadSummaryFileFromS3(session.s3Key);
+        fileBuffer = await _downloadSummaryFileFromStorage(session.s3Key);
       } catch (s3Err) {
-        Logger.error("generate-quiz-from-summary: S3 download failed", {
+        Logger.error("generate-quiz-from-summary: Storage download failed", {
           error: s3Err.message,
         });
-        return res
-          .status(500)
-          .json({
-            success: false,
-            error: { code: "S3_ERROR", message: "Could not retrieve original file." },
-          });
+        return res.status(500).json({
+          success: false,
+          error: { code: "STORAGE_ERROR", message: "Could not retrieve original file." },
+        });
       }
 
       // Determine file extension and build a mock file object for the existing pipeline
@@ -4044,15 +3950,13 @@ app.post(
       }
 
       if (!extractedContent || extractedContent.trim().length < 50) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: {
-              code: "INSUFFICIENT_CONTENT",
-              message: "Not enough content in the source file to generate questions.",
-            },
-          });
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INSUFFICIENT_CONTENT",
+            message: "Not enough content in the source file to generate questions.",
+          },
+        });
       }
 
       // Compute question type split
@@ -4068,15 +3972,13 @@ app.post(
       });
 
       if (!questions || questions.length === 0) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: {
-              code: "NO_QUESTIONS",
-              message: "Could not generate questions from this content.",
-            },
-          });
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "NO_QUESTIONS",
+            message: "Could not generate questions from this content.",
+          },
+        });
       }
 
       // Save questions to DB
@@ -4118,22 +4020,18 @@ app.post(
         userId: req.user.id,
       }).lean();
       if (!session)
-        return res
-          .status(404)
-          .json({
-            success: false,
-            error: { code: "NOT_FOUND", message: "Session not found" },
-          });
+        return res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "Session not found" },
+        });
       if (!session.chapters || session.chapters.length === 0) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: {
-              code: "NO_CONTENT",
-              message: "No chapters available for comprehension check.",
-            },
-          });
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "NO_CONTENT",
+            message: "No chapters available for comprehension check.",
+          },
+        });
       }
 
       // Build a text excerpt from all chapters
@@ -4225,16 +4123,14 @@ app.post("/api/ai/summary-sessions/:id/threads", authenticateToken, async (req, 
       userId: req.user.id,
     });
     if (threadCount >= 20) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: {
-            code: "THREAD_LIMIT",
-            message:
-              "You've reached the 20-chat limit for this session. Delete an old chat to create a new one.",
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: "THREAD_LIMIT",
+          message:
+            "You've reached the 20-chat limit for this session. Delete an old chat to create a new one.",
+        },
+      });
     }
 
     const thread = await ChatThread.create({
@@ -4285,12 +4181,10 @@ app.put(
     try {
       const { messages } = req.body;
       if (!Array.isArray(messages) || messages.length === 0) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            error: { code: "INVALID", message: "messages array required" },
-          });
+        return res.status(400).json({
+          success: false,
+          error: { code: "INVALID", message: "messages array required" },
+        });
       }
       const toAdd = messages.map((m) => ({
         role: m.role,
@@ -4549,26 +4443,22 @@ app.post("/api/restore-from-backup", authenticateToken, async (req, res) => {
       });
     }
 
-    // ===== S3 OPERATION: List Backups =====
+    // ===== STORAGE OPERATION: List Backups =====
     const s3Prefix = `question_backups/${userId}/${sanitizedTopic}`;
 
-    Logger.info("Restore backup: Listing S3 objects", {
+    Logger.info("Restore backup: Listing storage objects", {
       userId,
       topic: sanitizedTopic,
       prefix: s3Prefix,
     });
 
-    const listCommand = new ListObjectsV2Command({
-      Bucket: S3_BUCKET,
-      Prefix: s3Prefix,
-      MaxKeys: 100, // Limit results
-    });
-
     let listed;
     try {
-      listed = await s3Client.send(listCommand);
+      listed = await storageService.list(s3Prefix, req.user.organizationId || null, {
+        limit: 100,
+      });
     } catch (s3Err) {
-      Logger.error("S3 list operation failed", {
+      Logger.error("Storage list operation failed", {
         userId,
         topic: sanitizedTopic,
         error: s3Err.message,
@@ -4576,7 +4466,7 @@ app.post("/api/restore-from-backup", authenticateToken, async (req, res) => {
       return res.status(500).json({
         success: false,
         error: {
-          code: "S3_LIST_ERROR",
+          code: "STORAGE_LIST_ERROR",
           message: "Failed to access backup storage",
           timestamp: new Date().toISOString(),
         },
@@ -4584,7 +4474,7 @@ app.post("/api/restore-from-backup", authenticateToken, async (req, res) => {
     }
 
     // ===== VALIDATION #7: Backup Exists =====
-    if (!listed.Contents || listed.Contents.length === 0) {
+    if (!listed || listed.length === 0) {
       Logger.warn("No backups found for topic", {
         userId,
         topic: sanitizedTopic,
@@ -4600,30 +4490,27 @@ app.post("/api/restore-from-backup", authenticateToken, async (req, res) => {
     }
 
     // ===== SELECT LATEST BACKUP =====
-    const latest = listed.Contents.sort(
-      (a, b) => new Date(b.LastModified) - new Date(a.LastModified),
-    )[0];
+    const latest = listed.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
 
     Logger.info("Latest backup selected", {
       userId,
       topic: sanitizedTopic,
-      backupKey: latest.Key,
-      lastModified: latest.LastModified,
+      backupName: latest.name,
     });
 
-    // ===== S3 OPERATION: Get Backup =====
-    const getCommand = new GetObjectCommand({
-      Bucket: S3_BUCKET,
-      Key: latest.Key,
-    });
-
+    // ===== STORAGE OPERATION: Get Backup =====
     let data;
     try {
-      data = await s3Client.send(getCommand);
+      const backupPath = `${s3Prefix}/${latest.name}`;
+      const { buffer: backupBuffer } = await storageService.download(
+        backupPath,
+        req.user.organizationId || null,
+      );
+      data = { Body: backupBuffer };
     } catch (s3GetErr) {
-      Logger.error("S3 get operation failed", {
+      Logger.error("Storage get operation failed", {
         userId,
-        backupKey: latest.Key,
+        backupName: latest.name,
         error: s3GetErr.message,
       });
       return res.status(500).json({
@@ -4779,7 +4666,7 @@ app.post("/api/restore-from-backup", authenticateToken, async (req, res) => {
     // ===== GENERATE SIGNED URL =====
     let backupSignedUrl = null;
     try {
-      backupSignedUrl = await getSignedS3Url(latest.Key, 3600);
+      backupSignedUrl = await getSignedStorageUrl(latest.Key, null, 3600);
     } catch (urlErr) {
       Logger.warn("Failed to generate signed URL", {
         error: urlErr.message,
@@ -4924,17 +4811,28 @@ app.post("/api/admin/retry-upload", authenticateToken, requireAdmin, async (req,
     if (fileBuffer && mimeType) {
       try {
         const buffer = Buffer.from(fileBuffer, "base64");
-        const s3Upload = await uploadToS3(buffer, fileName, mimeType, req.user.id);
+        const s3Upload = await uploadToStorage(
+          buffer,
+          fileName,
+          mimeType,
+          req.user.id,
+          req.user.organizationId || null,
+        );
         s3FileKey = s3Upload.Key;
         s3Url = s3Upload.url;
-        Logger.info("S3 upload successful during retry", { s3FileKey });
+        Logger.info("Storage upload successful during retry", { s3FileKey });
       } catch (s3Err) {
-        Logger.warn("S3 upload failed during retry", { error: s3Err.message });
+        Logger.warn("Storage upload failed during retry", { error: s3Err.message });
       }
     }
     let backupInfo = null;
     try {
-      backupInfo = await saveBackupToS3(req.user.id, topic, cleanedQuestions);
+      backupInfo = await saveBackupToStorage(
+        req.user.id,
+        topic,
+        cleanedQuestions,
+        req.user.organizationId || null,
+      );
       Logger.info("Backup created during retry", { backupKey: backupInfo.backupKey });
     } catch (backupErr) {
       Logger.warn("Backup failed during retry", { error: backupErr.message });
@@ -5240,10 +5138,12 @@ app.post(
         });
       }
 
+      // B2B: org-scoped storage upload via Supabase
+      const orgId = req.user.organizationId || null;
       const [s3Result, dbResult, backupResult] = await Promise.allSettled([
-        uploadToS3(fileBuffer, fileName, mimeType, req.user.id),
+        uploadToStorage(fileBuffer, fileName, mimeType, req.user.id, orgId),
         Question.insertMany(deduped),
-        saveBackupToS3(req.user.id, topic, deduped),
+        saveBackupToStorage(req.user.id, topic, deduped, orgId),
       ]);
 
       // Handle S3 upload result
@@ -5447,7 +5347,11 @@ app.get("/api/files/download/:fileKey", authenticateToken, async (req, res) => {
       });
     }
 
-    const signedUrl = await getSignedS3Url(fileKey, 3600);
+    const signedUrl = await getSignedStorageUrl(
+      fileKey,
+      req.user.organizationId || null,
+      3600,
+    );
 
     if (!signedUrl) {
       return res.status(500).json({
@@ -5717,22 +5621,22 @@ app.post(
           const { bundleBuffer, manifest } = createBundle(fileHashes);
           const bundleS3Key = buildBundleS3Key(req.user.id, files.length);
 
-          // ── Fire-and-forget the S3 upload ──────────────────────────────────
+          // ── Fire-and-forget the Supabase upload ─────────────────────────
           // Uploading a large bundle synchronously during the HTTP request can
           // exceed Node.js's built-in 5-minute requestTimeout, causing the
           // server to send a 408 before our 202 — resulting in ERR_HTTP_HEADERS_SENT.
-          // We pre-compute the S3 key so the worker knows where to fetch from,
-          // then start the upload in the background. The worker retries S3 fetch
+          // We pre-compute the storage key so the worker knows where to fetch from,
+          // then start the upload in the background. The worker retries fetch
           // until the upload lands (see _processMultiFileJob Step 1).
-          const bundleUploadCmd = new PutObjectCommand({
-            Bucket: S3_BUCKET,
-            Key: bundleS3Key,
-            Body: bundleBuffer,
-            ContentType: "application/zip",
-          });
           const _bundleRedisKey = `bundle_upload:${bundleS3Key}`;
-          s3Client
-            .send(bundleUploadCmd)
+          storageService
+            .upload(
+              bundleBuffer,
+              bundleS3Key,
+              "application/zip",
+              req.user.organizationId || null,
+              req.user.id,
+            )
             .then(async () => {
               Logger.info("[S3 SUCCESS] Multi-file ZIP bundle uploaded (background)", {
                 s3Key: bundleS3Key.substring(0, 40) + "...",
@@ -5856,17 +5760,7 @@ app.post(
             });
           }
 
-          // Enqueue job instead of processing immediately
-          const s3FileKey = await uploadToS3(
-            fileBuffer,
-            fileName,
-            file.mimetype,
-            req.user.id,
-          ).then((res) => res.Key);
-          Logger.info(`[S3 SUCCESS] File successfully uploaded to S3`, {
-            s3FileKey,
-            userId: req.user.id,
-          });
+          // Enqueue job instead of processing immediately\n          const s3FileKey = await uploadToStorage(\n            fileBuffer,\n            fileName,\n            file.mimetype,\n            req.user.id,\n            req.user.organizationId || null,\n          ).then((res) => res.Key);\n          Logger.info(`[Storage SUCCESS] File successfully uploaded`, {\n            s3FileKey,\n            userId: req.user.id,\n          });
 
           // BullMQ's jobId uniqueness prevents duplicate jobs atomically
           const job = await taskQueue.add(
@@ -6119,36 +6013,41 @@ app.get("/api/user/quiz", authenticateToken, async (req, res) => {
     }
 
     if (questions.length === 0) {
-      console.log("  No questions in DB, checking S3 backup...");
+      console.log("  No questions in DB, checking storage backup...");
 
-      const listCommand = new ListObjectsV2Command({
-        Bucket: S3_BUCKET,
-        Prefix: `question_backups/${req.user.id}/${topic}`,
-      });
-      const backups = await s3Client.send(listCommand);
+      // List backup files via storageService
+      const backupPrefix = `question_backups/${req.user.id}/${topic}`;
+      const backupFiles = await storageService.list(
+        backupPrefix,
+        req.user.organizationId || null,
+      );
 
-      if (backups.Contents && backups.Contents.length > 0) {
-        const latestBackup = backups.Contents.sort(
-          (a, b) => new Date(b.LastModified) - new Date(a.LastModified),
+      if (backupFiles && backupFiles.length > 0) {
+        const latestBackup = backupFiles.sort(
+          (a, b) => new Date(b.created_at) - new Date(a.created_at),
         )[0];
 
-        const getCommand = new GetObjectCommand({
-          Bucket: S3_BUCKET,
-          Key: latestBackup.Key,
-        });
-        const restoredData = await s3Client.send(getCommand);
+        const backupPath = `${backupPrefix}/${latestBackup.name}`;
+        const { buffer: restoredBuffer } = await storageService.download(
+          backupPath,
+          req.user.organizationId || null,
+        );
 
-        let restoredQuestions = JSON.parse(await restoredData.Body.transformToString());
+        let restoredQuestions = JSON.parse(restoredBuffer.toString("utf-8"));
 
         restoredQuestions = restoredQuestions
           .sort(() => Math.random() - 0.5)
           .slice(0, parseInt(limit));
 
         if (restoredQuestions.length > 0) {
-          console.log("✅ Restoring", restoredQuestions.length, "questions from S3");
+          console.log("Restoring", restoredQuestions.length, "questions from backup");
           const insertedQuestions = await Question.insertMany(restoredQuestions);
 
-          const backupSignedUrl = await getSignedS3Url(latestBackup.Key, 3600);
+          const backupSignedUrl = await getSignedStorageUrl(
+            backupPath,
+            req.user.organizationId || null,
+            3600,
+          );
 
           await PdfLibrary.create({
             userId,
@@ -6693,7 +6592,7 @@ app.post("/api/auth/logout", authenticateToken, async (req, res) => {
 app.post("/api/auth/refresh", (req, res) => {
   try {
     const TokenService = require("./services/tokenService");
-    const refreshToken = req.cookies.refreshToken;
+    const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
 
     if (!refreshToken) {
       return res.status(401).json({
@@ -6766,311 +6665,6 @@ app.post("/api/auth/refresh", (req, res) => {
   }
 });
 
-// ===== Auth: Firebase Login/Signup =====
-app.post("/api/auth/firebase-login", async (req, res) => {
-  try {
-    const { firebaseToken } = req.body;
-
-    // ===== VALIDATION #1: Token Required =====
-    if (!firebaseToken) {
-      Logger.warn("Firebase login: Missing token");
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "MISSING_FIREBASE_TOKEN",
-          message: "Firebase token is required",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== VALIDATION #2: Token Type =====
-    if (typeof firebaseToken !== "string") {
-      Logger.warn("Firebase login: Invalid token type", {
-        type: typeof firebaseToken,
-      });
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "INVALID_TOKEN_TYPE",
-          message: "Firebase token must be a string",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== VALIDATION #3: Token Not Empty =====
-    if (firebaseToken.trim().length === 0) {
-      Logger.warn("Firebase login: Empty token");
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "EMPTY_TOKEN",
-          message: "Firebase token cannot be empty",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== VALIDATION #4: Token Length Check (JWT tokens are typically 800-2000 chars) =====
-    if (firebaseToken.length < 100 || firebaseToken.length > 5000) {
-      Logger.warn("Firebase login: Suspicious token length", {
-        length: firebaseToken.length,
-      });
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "INVALID_TOKEN_LENGTH",
-          message: "Invalid Firebase token format",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== STEP 1: Verify Firebase Token =====
-    let decodedToken;
-    try {
-      decodedToken = await verifyFirebaseToken(firebaseToken);
-
-      Logger.info("Firebase token verified", {
-        uid: decodedToken.uid,
-        email: decodedToken.email,
-      });
-    } catch (verifyErr) {
-      Logger.error("Firebase token verification failed", {
-        error: verifyErr.message,
-      });
-
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: "INVALID_FIREBASE_TOKEN",
-          message: verifyErr.message || "Invalid or expired Firebase token",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== VALIDATION #5: Extract and Validate Email =====
-    const email = decodedToken.email?.toLowerCase()?.trim();
-
-    if (!email) {
-      Logger.error("Firebase login: Missing email in token", {
-        uid: decodedToken.uid,
-      });
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "MISSING_EMAIL",
-          message: "Email not found in Firebase token",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    if (!isValidEmail(email)) {
-      Logger.error("Firebase login: Invalid email format", {
-        email,
-        uid: decodedToken.uid,
-      });
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "INVALID_EMAIL",
-          message: "Invalid email format from Firebase token",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== STEP 2: Check if User Exists =====
-    let user = await User.findOne({
-      $or: [{ firebaseUid: decodedToken.uid }, { email: email }],
-    }).select("-password");
-
-    // ===== STEP 3: Create New User or Update Existing =====
-    if (!user) {
-      // Extract user info from Firebase token
-      const fullname = decodedToken.name || email.split("@")[0];
-      const baseUsername = email.split("@")[0].toLowerCase();
-
-      // Ensure unique username
-      let username = baseUsername;
-      let usernameExists = await User.findOne({ username });
-      let attempts = 0;
-
-      while (usernameExists && attempts < 10) {
-        username = `${baseUsername}_${Math.random().toString(36).substring(2, 7)}`;
-        usernameExists = await User.findOne({ username });
-        attempts++;
-      }
-
-      if (usernameExists) {
-        Logger.error("Firebase login: Failed to generate unique username");
-        return res.status(500).json({
-          success: false,
-          error: {
-            code: "USERNAME_GENERATION_FAILED",
-            message: "Failed to create account. Please try again",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      // Create new user
-      user = new User({
-        firebaseUid: decodedToken.uid,
-        email: email,
-        fullname: fullname.trim(),
-        username: username,
-        provider: "firebase",
-        emailVerified: decodedToken.email_verified || false,
-        isActive: true,
-        createdAt: new Date(),
-      });
-
-      await user.save();
-
-      Logger.info("New Firebase user created", {
-        userId: user._id,
-        email,
-        uid: decodedToken.uid,
-      });
-    } else {
-      // Update existing user's Firebase UID if missing
-      if (!user.firebaseUid && user.email === email) {
-        user.firebaseUid = decodedToken.uid;
-        await user.save();
-      }
-
-      Logger.info("Existing Firebase user logged in", {
-        userId: user._id,
-        email,
-      });
-    }
-
-    // ===== VALIDATION #6: Check if Account is Active =====
-    if (!user.isActive) {
-      Logger.warn("Firebase login: Inactive account", {
-        userId: user._id,
-      });
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: "ACCOUNT_INACTIVE",
-          message: "Your account has been deactivated. Please contact support",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    // ===== STEP 4: Generate JWT Token =====
-    if (!process.env.JWT_SECRET) {
-      Logger.error("JWT_SECRET not configured");
-      return res.status(500).json({
-        success: false,
-        error: {
-          code: "CONFIG_ERROR",
-          message: "Server configuration error. Please contact support",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    const userRole = user.role || "user";
-    const isAdmin = userRole === "admin" || userRole === "superadmin";
-    const isSuperAdmin = userRole === "superadmin";
-
-    const jwtToken = jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        role: userRole,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" },
-    );
-
-    // Generate refresh token
-    const TokenService = require("./services/tokenService");
-    const accessToken = TokenService.generateAccessToken(user);
-    const refreshToken = TokenService.generateRefreshToken(user);
-
-    // ===== STEP 5: Set Secure Cookies =====
-    res.cookie("token", accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 60 * 60 * 1000, // 1 hour
-      path: "/",
-    });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "none",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: "/",
-    });
-
-    // ===== STEP 6: Update Last Login =====
-    user.lastLogin = new Date();
-    await user.save();
-
-    // ===== STEP 7: Return Success Response =====
-    Logger.info("Firebase login successful", {
-      userId: user._id,
-      email,
-      isNewUser: !user.firebaseUid,
-    });
-
-    return res.json({
-      success: true,
-      data: {
-        accessToken,
-        refreshToken,
-        user: {
-          id: user._id,
-          fullname: user.fullname,
-          username: user.username,
-          email: user.email,
-          role: userRole,
-          isAdmin,
-          isSuperAdmin,
-          provider: "firebase",
-          emailVerified: user.emailVerified,
-          subscriptionTier: user.subscriptionTier || "free",
-          subscriptionStatus: user.subscriptionStatus || "active",
-          limits: user.limits,
-          usage: user.usage,
-          createdAt: user.createdAt,
-        },
-        isAdmin,
-        isSuperAdmin,
-        redirectTo: isAdmin ? "/admin" : "/dashboard",
-      },
-      error: null,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    // ===== GLOBAL ERROR HANDLER =====
-    Logger.error("Firebase login error", {
-      error: err.message,
-      stack: err.stack,
-    });
-
-    return res.status(500).json({
-      success: false,
-      error: {
-        code: "FIREBASE_LOGIN_ERROR",
-        message: "Something went wrong during Firebase login. Please try again later",
-        details: process.env.NODE_ENV === "development" ? err.message : undefined,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  }
-});
-
 app.get("/api/auth/verify", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -7130,6 +6724,10 @@ app.get("/api/auth/verify", authenticateToken, async (req, res) => {
           usage: user.usage,
           isActive: user.isActive,
           createdAt: user.createdAt,
+          // B2B org-scoped fields
+          orgRole: user.orgRole || null,
+          organizationId: user.organizationId || null,
+          classId: user.classId || null,
         },
         isAdmin,
         isSuperAdmin,
@@ -7521,14 +7119,15 @@ app.post("/api/user/request-delete-otp", authenticateToken, async (req, res) => 
     });
   } catch (error) {
     Logger.error("Request delete OTP error", { error: error.message, userId: req.user.id });
-    if (!res.headersSent) res.status(500).json({
-      success: false,
-      error: {
-        code: "OTP_SEND_FAILED",
-        message: "Failed to send verification code",
-        timestamp: new Date().toISOString(),
-      },
-    });
+    if (!res.headersSent)
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "OTP_SEND_FAILED",
+          message: "Failed to send verification code",
+          timestamp: new Date().toISOString(),
+        },
+      });
   }
 });
 
@@ -7669,14 +7268,15 @@ app.post("/api/contact", validateContact, async (req, res) => {
     });
   } catch (error) {
     Logger.error("Contact form error", { error: error.message });
-    if (!res.headersSent) res.status(500).json({
-      success: false,
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "Failed to send message. Please try again later",
-        timestamp: new Date().toISOString(),
-      },
-    });
+    if (!res.headersSent)
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to send message. Please try again later",
+          timestamp: new Date().toISOString(),
+        },
+      });
   }
 });
 
@@ -7862,12 +7462,10 @@ app.post("/api/user/upgrade", authenticateToken, async (req, res) => {
 
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "USER_NOT_FOUND", message: "User not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
     }
 
     // Prevent downgrade via this endpoint
@@ -8155,12 +7753,10 @@ app.get("/api/paystack/verify/:reference", authenticateToken, async (req, res) =
     const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 
     if (!paystackSecretKey) {
-      return res
-        .status(503)
-        .json({
-          success: false,
-          error: { code: "PAYMENT_UNAVAILABLE", message: "Payment not configured" },
-        });
+      return res.status(503).json({
+        success: false,
+        error: { code: "PAYMENT_UNAVAILABLE", message: "Payment not configured" },
+      });
     }
 
     const https = require("https");
@@ -8273,12 +7869,10 @@ app.get("/api/paystack/verify/:reference", authenticateToken, async (req, res) =
     });
   } catch (err) {
     Logger.error("Payment verification error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "VERIFY_ERROR", message: "Failed to verify payment" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "VERIFY_ERROR", message: "Failed to verify payment" },
+    });
   }
 });
 
@@ -8308,12 +7902,10 @@ app.get("/api/plans", async (req, res) => {
     });
   } catch (err) {
     Logger.error("Plans fetch error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "SERVER_ERROR", message: "Failed to fetch plans" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "SERVER_ERROR", message: "Failed to fetch plans" },
+    });
   }
 });
 
@@ -8322,21 +7914,17 @@ app.post("/api/user/cancel-subscription", authenticateToken, async (req, res) =>
   try {
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          error: { code: "USER_NOT_FOUND", message: "User not found" },
-        });
+      return res.status(404).json({
+        success: false,
+        error: { code: "USER_NOT_FOUND", message: "User not found" },
+      });
     }
 
     if (user.subscriptionTier === "free") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: { code: "ALREADY_FREE", message: "You are already on the free plan" },
-        });
+      return res.status(400).json({
+        success: false,
+        error: { code: "ALREADY_FREE", message: "You are already on the free plan" },
+      });
     }
 
     // If user has a Paystack subscription, disable it
@@ -8403,12 +7991,10 @@ app.post("/api/user/cancel-subscription", authenticateToken, async (req, res) =>
     });
   } catch (err) {
     Logger.error("Cancel subscription error", { error: err.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: { code: "SERVER_ERROR", message: "Failed to cancel subscription" },
-      });
+    res.status(500).json({
+      success: false,
+      error: { code: "SERVER_ERROR", message: "Failed to cancel subscription" },
+    });
   }
 });
 

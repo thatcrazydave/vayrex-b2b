@@ -117,13 +117,36 @@
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
 }
 
+.nav-cta-action {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  background: black !important;
+  color: white !important;
+  border: 1px solid black !important;
+  padding: 0.5rem 1.15rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+  margin-left: 0.5rem;
+  transition: all 0.3s var(--ease-out-expo);
+  cursor: pointer;
+}
+
+.nav-cta-action:hover {
+  background: var(--secondary-color) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
 /* Hamburger */
 .hamburger {
   display: none;
   cursor: pointer;
   width: 38px;
   height: 38px;
-  background: transparent;
+  background: black;
   border: none;
   border-radius: var(--radius-sm);
   flex-direction: column;
@@ -199,7 +222,7 @@
   padding: 0.85rem 1.5rem;
   border-radius: var(--radius-md);
   border: none;
-  background: transparent;
+  background: black;
   transition: all 0.3s var(--ease-out-expo);
   opacity: 0;
   transform: translateY(12px);

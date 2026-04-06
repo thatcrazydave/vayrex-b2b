@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext.jsx";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { useAuth, getDashboardRoute } from "../contexts/AuthContext.jsx";
 import { validateSignupForm } from "../utils/validation.js";
-import { FaGoogle } from 'react-icons/fa';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 import { showToast } from "../utils/toast.js";
 import "../styles/auth.css";
+import api from '../services/api.js';
 
 const Signup = () => {
   const [formData, setFormData] = useState({
@@ -19,14 +19,20 @@ const Signup = () => {
   const [touched, setTouched] = useState({});
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
-  const { signup, loginWithGoogle, loading, error, clearError, isAuthenticated, isInitialized } = useAuth();
+  const [inviteData, setInviteData] = useState(null); // { invite, org } from accept-invite endpoint
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('inviteToken');
+  // Persist the token in state so URL changes after load don't lose it
+  const [savedInviteToken, setSavedInviteToken] = useState(() => searchParams.get('inviteToken'));
+
+  const { signup, loading, error, clearError, isAuthenticated, isInitialized } = useAuth();
   const navigate = useNavigate();
 
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated && isInitialized) {
-      navigate("/Dashboard");
+      navigate(getDashboardRoute(null));
     }
   }, [isAuthenticated, isInitialized, navigate]);
 
@@ -38,13 +44,34 @@ const Signup = () => {
     }
   }, [error, clearError]);
 
+  // Fetch invite details if inviteToken present in URL
+  useEffect(() => {
+    if (!inviteToken) return;
+    setSavedInviteToken(inviteToken); // keep the token even if URL later changes
+    setInviteLoading(true);
+    api.get(`/auth/accept-invite/${encodeURIComponent(inviteToken)}`)
+      .then((res) => {
+        if (res.data.success) {
+          setInviteData(res.data);
+          // Pre-fill and lock email to the invited address
+          if (res.data.invite?.email) {
+            setFormData((f) => ({ ...f, email: res.data.invite.email }));
+          }
+        }
+      })
+      .catch(() => {
+        showToast.warning('This invitation link may have expired or already been used.');
+      })
+      .finally(() => setInviteLoading(false));
+  }, [inviteToken]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
-    
+
     // Clear error for this field when user starts typing
     if (errors[name]) {
       setErrors(prev => ({
@@ -64,10 +91,10 @@ const Signup = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validate form
     const validation = validateSignupForm(formData);
-    
+
     if (!validation.isValid) {
       setErrors(validation.errors);
       // Mark all fields as touched to show errors
@@ -85,23 +112,32 @@ const Signup = () => {
     }
 
     // All validation passed, proceed with signup
-    const { confirmPassword, ...signupData } = formData;
-    
-    const result = await signup(formData);
-    if (result.success) {
-      showToast.success("Account created! Please check your email to verify your account.");
-      setTimeout(() => navigate("/login"), 2000);
-    } else {
-      showToast.error(result.error || "Signup failed");
-    }
-  };
+    // Use savedInviteToken (persisted at mount) as fallback in case URL changed
+    const activeInviteToken = inviteToken || savedInviteToken;
+    const signupPayload = { ...formData };
+    if (activeInviteToken) signupPayload.inviteToken = activeInviteToken;
 
-  const handleGoogleLogin = async () => {
-    try {
-      showToast.info("Redirecting to Google...");
-      await loginWithGoogle();
-    } catch (err) {
-      showToast.error("Google signup failed. Please try again.");
+    const result = await signup(signupPayload);
+    if (result.success) {
+      if (inviteData?.org) {
+        showToast.success(`Account created! You're now a member of ${inviteData.org.name}. Check your email to verify.`);
+      } else {
+        showToast.success("Account created! Please check your email to verify your account.");
+      }
+      setTimeout(() => navigate("/login"), 2000);
+    } else if (result.pending) {
+      if (activeInviteToken) {
+        showToast.error('There was a problem processing your invite. Please use the original invite link again or contact your admin.');
+      } else {
+        showToast.info('Account created! Your account is pending admin approval. You will be notified by email.');
+        setTimeout(() => navigate('/login'), 3000);
+      }
+    } else if (result.code === 'USER_EXISTS' && activeInviteToken) {
+      // Existing user trying to accept an invite — redirect to login with token preserved
+      showToast.info(result.error || 'You already have an account. Please log in to accept the invitation.');
+      setTimeout(() => navigate(`/Login?inviteToken=${encodeURIComponent(activeInviteToken)}`), 2000);
+    } else {
+      showToast.error(result.error || 'Signup failed');
     }
   };
 
@@ -115,10 +151,23 @@ const Signup = () => {
     <div className="auth-container">
       <div className="auth-card">
         <h2>Create Account</h2>
-        <p className="auth-subtitle">Join Vayrex and start learning</p>
-        
+        <p className="auth-subtitle">
+          {inviteData?.org ? `Join ${inviteData.org.name} on Vayrex` : 'Create your account'}
+        </p>
+
+        {/* Invite Banner */}
+        {inviteToken && (
+          <div style={{ background: '#e8f0fe', border: '1.5px solid #c5cae9', borderRadius: 10, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#1a237e' }}>
+            {inviteLoading
+              ? 'Validating invitation…'
+              : inviteData
+              ? `You have been invited to join ${inviteData.org?.name || 'an organisation'} as ${inviteData.invite?.orgRole?.replace('_', ' ')}.`
+              : 'This invitation link is invalid or has expired.'}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="auth-form" autoComplete="off" noValidate>
-          
+
           {/* Full Name Input */}
           <div className="form-group">
             <input
@@ -163,7 +212,8 @@ const Signup = () => {
               onChange={handleChange}
               onBlur={handleBlur}
               className={`form-input ${errors.email ? 'error' : ''}`}
-              disabled={loading}
+              disabled={loading || !!inviteData}
+              readOnly={!!inviteData}
             />
             {touched.email && errors.email && (
               <span className="error-message">{errors.email}</span>
@@ -227,28 +277,12 @@ const Signup = () => {
           </div>
 
           {/* Sign Up Button */}
-          <button 
-            type="submit" 
+          <button
+            type="submit"
             className="auth-button"
             disabled={loading}
           >
             {loading ? "Creating Account..." : "Sign Up"}
-          </button>
-
-          {/* Divider */}
-          <div className="auth-divider">
-            <span>or</span>
-          </div>
-
-          {/* Google Button */}
-          <button 
-            type="button" 
-            className="google-button"
-            onClick={handleGoogleLogin}
-            disabled={loading}
-          >
-            <FaGoogle />
-            Continue with Google
           </button>
 
           {/* Sign In Link */}

@@ -65,7 +65,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   padding: 0.65rem 1rem;
-  background: transparent;
+  background: black;
   font-weight: 600;
   color: var(--text-light);
   transition: all 0.2s var(--ease-out-expo);

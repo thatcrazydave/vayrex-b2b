@@ -246,7 +246,7 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-secondary);
-  background: transparent;
+  background: black;
   border: none;
   cursor: pointer;
   transition: all 0.3s var(--ease-out-expo);
@@ -781,7 +781,7 @@
 }
 
 .course-chapter-item.chapter-generating:hover {
-  background: transparent;
+  background: black;
 }
 
 /* full-screen loading skeleton when 0 chapters arrived yet */
@@ -1129,7 +1129,7 @@
   width: 6px;
   flex-shrink: 0;
   cursor: col-resize;
-  background: transparent;
+  background: black;
   position: relative;
   z-index: 101;
   transition: background 0.2s;
@@ -1627,10 +1627,12 @@
   transition: transform 0.15s, background 0.15s;
   user-select: none;
 }
+
 .highlight-custom-btn:hover {
   transform: scale(1.2);
   background: rgba(255, 255, 255, 0.22);
 }
+
 .highlight-color-input {
   position: absolute;
   inset: 0;
@@ -1976,6 +1978,7 @@
 }
 
 @media (max-width: 700px) {
+
   /* Keep the fixed full-screen container — no stacking */
   .course-view {
     flex-direction: row;
@@ -2880,7 +2883,7 @@
   color: var(--text-secondary);
 }
 
-.outline-confirm-question > svg {
+.outline-confirm-question>svg {
   flex-shrink: 0;
   margin-top: 2px;
   color: var(--primary-color);
@@ -2963,8 +2966,8 @@
   gap: 8px;
   padding: 0.7rem 1rem;
   margin-bottom: 1rem;
-  background: rgba(245,158,11,0.08);
-  border: 1px solid rgba(245,158,11,0.25);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 8px;
   font-size: 0.84rem;
   color: #b45309;
@@ -2972,7 +2975,7 @@
 
 [data-theme="dark"] .outline-depth-warning {
   color: #fbbf24;
-  background: rgba(245,158,11,0.12);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .outline-course-name-field {
@@ -3016,7 +3019,7 @@
 .outline-cancel-btn {
   padding: 9px 18px;
   border-radius: 8px;
-  background: transparent;
+  background: black;
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
   font-size: 0.88rem;
@@ -3048,7 +3051,7 @@
 }
 
 .session-type-badge.outline {
-  background: rgba(99,102,241,0.12);
+  background: rgba(99, 102, 241, 0.12);
   color: var(--primary-color);
 }
 
@@ -3059,8 +3062,8 @@
   gap: 8px;
   padding: 8px 14px;
   margin-bottom: 0.8rem;
-  background: rgba(99,102,241,0.06);
-  border: 1px solid rgba(99,102,241,0.15);
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: 8px;
   font-size: 0.8rem;
   color: var(--text-secondary);
@@ -3116,8 +3119,8 @@
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid rgba(239,68,68,0.3);
-  background: rgba(239,68,68,0.06);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.06);
   color: #ef4444;
   transition: all 0.2s;
   flex-shrink: 0;
@@ -3156,7 +3159,7 @@
   padding: 5px 10px;
   font-size: 0.76rem;
   color: var(--text-secondary);
-  background: transparent;
+  background: black;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -3171,7 +3174,7 @@
 }
 
 .course-subchapter-item.active {
-  background: rgba(99,102,241,0.1);
+  background: rgba(99, 102, 241, 0.1);
   color: var(--primary-color);
   font-weight: 600;
 }
@@ -3250,7 +3253,7 @@
 
 .outline-card:hover:not(:disabled) {
   border-color: var(--primary-color);
-  box-shadow: 0 2px 8px rgba(99,102,241,0.12);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
 }
 
 .outline-card:disabled {
@@ -3297,7 +3300,7 @@
   gap: 5px;
   padding: 4px 0;
   margin-bottom: 0.6rem;
-  background: transparent;
+  background: black;
   border: none;
   color: var(--primary-color);
   font-size: 0.82rem;
@@ -3403,7 +3406,7 @@
 }
 
 .lce-copy-btn {
-  background: transparent;
+  background: black;
   border: 1px solid #45475a;
   color: #cdd6f4;
   padding: 2px 9px;
@@ -3426,14 +3429,14 @@
   display: flex;
   gap: 0;
   margin: 0 0.25rem;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 4px;
   overflow: hidden;
   border: 1px solid #313244;
 }
 
 .lce-tab-btn {
-  background: transparent;
+  background: black;
   border: none;
   color: #6c7086;
   padding: 3px 12px;
@@ -3449,7 +3452,7 @@
 
 .lce-tab-btn:hover {
   color: #cdd6f4;
-  background: rgba(255,255,255,0.06);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .lce-tab-btn.active {

@@ -20,7 +20,7 @@ const PaymentCallback = () => {
     if (verifiedRef.current) return;
 
     const reference = searchParams.get('reference') || searchParams.get('trxref');
-    
+
     if (!reference) {
       setStatus('error');
       setMessage('No payment reference found. Please try again.');
@@ -41,16 +41,16 @@ const PaymentCallback = () => {
   const verify = async (reference) => {
     try {
       const res = await verifyPayment(reference);
-      
+
       if (res.success) {
         setStatus('success');
         const tier = res.data?.tier || 'upgraded';
         setMessage(`Payment successful! You are now on the ${tier.charAt(0).toUpperCase() + tier.slice(1)} plan.`);
         showToast.success('Payment verified successfully!');
-        
+
         // Update user context with new tier
         if (updateUser && res.data?.tier) {
-          updateUser({ 
+          updateUser({
             subscriptionTier: res.data.tier,
             subscriptionStatus: 'active'
           });
@@ -61,14 +61,14 @@ const PaymentCallback = () => {
       }
     } catch (err) {
       console.error('Payment verification error:', err);
-      
+
       // If 401/403, user session expired — still show a helpful message
       if (err.response?.status === 401 || err.response?.status === 403) {
         setStatus('success');
         setMessage('Payment received! Please log in to see your upgraded plan.');
         return;
       }
-      
+
       const errMsg = err.response?.data?.error?.message || 'Unable to verify payment. Please contact support if you were charged.';
       setStatus('error');
       setMessage(errMsg);
@@ -116,14 +116,14 @@ const PaymentCallback = () => {
         <div className="callback-actions">
           {status === 'success' && isAuthenticated && (
             <>
-              <button 
-                className="btn-primary" 
-                onClick={() => navigate('/Dashboard')}
+              <button
+                className="btn-primary"
+                onClick={() => navigate('/org-admin')}
                 style={{ background: 'var(--primary-color)', color: '#fff', border: '2px solid var(--primary-color)' }}
               >
                 Go to Dashboard
               </button>
-              <button 
+              <button
                 className="btn-secondary"
                 onClick={() => navigate('/pricing')}
                 style={{ background: 'transparent', color: 'var(--primary-color)', border: '2px solid var(--primary-color)' }}
@@ -134,8 +134,8 @@ const PaymentCallback = () => {
           )}
           {status === 'success' && !isAuthenticated && (
             <>
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 onClick={() => navigate('/Login')}
                 style={{ background: 'var(--primary-color)', color: '#fff', border: '2px solid var(--primary-color)' }}
               >
@@ -145,14 +145,14 @@ const PaymentCallback = () => {
           )}
           {status === 'error' && (
             <>
-              <button 
+              <button
                 className="btn-primary"
                 onClick={() => navigate('/pricing')}
                 style={{ background: 'var(--primary-color)', color: '#fff', border: '2px solid var(--primary-color)' }}
               >
                 Try Again
               </button>
-              <button 
+              <button
                 className="btn-secondary"
                 onClick={() => navigate('/contact')}
                 style={{ background: 'transparent', color: 'var(--primary-color)', border: '2px solid var(--primary-color)' }}

@@ -1,26 +1,26 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { authenticateToken } = require('../middleware/auth');
-const { adminAuth, superAdminAuth } = require('../middleware/adminAuth');
-const auditLogger = require('../middleware/auditLogger');
-const User = require('../models/User');
-const Question = require('../models/questions');
-const Result = require('../models/result');
-const PdfLibrary = require('../models/PdfLibrary');
-const Contact = require('../models/contact');
-const AuditLog = require('../models/AuditLog');
-const SystemAlert = require('../models/SystemAlert');
-const ApiUsage = require('../models/ApiUsage');
-const FlaggedContent = require('../models/FlaggedContent');
-const BackupHistory = require('../models/BackupHistory');
-const backupService = require('../services/backupService');
-const reportService = require('../services/reportService');
-const AlertService = require('../services/alertService');
-const emailService = require('../services/emailService');
-const PricingConfig = require('../models/PricingConfig');
-const Logger = require('../logger');
-const mongoose = require('mongoose');
-const { devNull } = require('os');
+const { authenticateToken } = require("../middleware/auth");
+const { adminAuth, superAdminAuth } = require("../middleware/adminAuth");
+const auditLogger = require("../middleware/auditLogger");
+const User = require("../models/User");
+const Question = require("../models/questions");
+const Result = require("../models/result");
+const PdfLibrary = require("../models/PdfLibrary");
+const Contact = require("../models/contact");
+const AuditLog = require("../models/AuditLog");
+const SystemAlert = require("../models/SystemAlert");
+const ApiUsage = require("../models/ApiUsage");
+const FlaggedContent = require("../models/FlaggedContent");
+const BackupHistory = require("../models/BackupHistory");
+const backupService = require("../services/backupService");
+const reportService = require("../services/reportService");
+const AlertService = require("../services/alertService");
+const emailService = require("../services/emailService");
+const PricingConfig = require("../models/PricingConfig");
+const Logger = require("../logger");
+const mongoose = require("mongoose");
+const { devNull } = require("os");
 
 // Sanitize pagination params to prevent negative skip or DoS via huge limits
 const sanitizePagination = (rawPage, rawLimit, defaultLimit = 20) => {
@@ -75,27 +75,27 @@ router.use(adminAuth);
 // ===== ADMIN VERIFICATION ENDPOINT =====
 
 // Lightweight endpoint for frontend to verify admin access
-router.get('/verify-access', async (req, res) => {
+router.get("/verify-access", async (req, res) => {
   try {
     // If we reached here, authenticateToken and adminAuth passed
     res.json({
       success: true,
       verified: true,
       role: req.user.role,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    Logger.error('Admin verification error', {
+    Logger.error("Admin verification error", {
       userId: req.user?.id,
-      error: error.message
+      error: error.message,
     });
 
     res.status(500).json({
       success: false,
       error: {
-        code: 'VERIFICATION_ERROR',
-        message: 'Unable to verify admin access'
-      }
+        code: "VERIFICATION_ERROR",
+        message: "Unable to verify admin access",
+      },
     });
   }
 });
@@ -103,14 +103,14 @@ router.get('/verify-access', async (req, res) => {
 // ===== BACKUP MANAGEMENT =====
 
 // Get all backups with pagination and stats
-router.get('/backups', async (req, res) => {
+router.get("/backups", async (req, res) => {
   try {
     const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 20);
 
     const [backups, stats, total] = await Promise.all([
       backupService.getBackupHistory(limit, skip),
       backupService.getBackupStats(),
-      BackupHistory.countDocuments()
+      BackupHistory.countDocuments(),
     ]);
 
     res.json({
@@ -122,108 +122,107 @@ router.get('/backups', async (req, res) => {
           totalSize: stats.totalSize,
           byStatus: stats.byStatus || {},
           byType: stats.byType || {},
-          latest: stats.latest
+          latest: stats.latest,
         },
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
           totalBackups: total,
-          backupsPerPage: limit
-        }
-      }
+          backupsPerPage: limit,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Backup list error', { error: err.message });
+    Logger.error("Backup list error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'BACKUP_LIST_ERROR',
-        message: 'Failed to fetch backups',
-        timestamp: new Date().toISOString()
-      }
+        code: "BACKUP_LIST_ERROR",
+        message: "Failed to fetch backups",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // Create a new backup - Requires admin or superadmin
-router.post('/backups/create', auditLogger('backup_created', 'backup'), async (req, res) => {
+router.post("/backups/create", auditLogger("backup_created", "backup"), async (req, res) => {
   try {
-    const { type = 'full', collections = [] } = req.body;
+    const { type = "full", collections = [] } = req.body;
 
     // Input validation
-    if (!['full', 'partial'].includes(type)) {
+    if (!["full", "partial"].includes(type)) {
       return res.status(400).json({
         success: false,
         error: {
-          code: 'INVALID_TYPE',
+          code: "INVALID_TYPE",
           message: 'Backup type must be "full" or "partial"',
-          timestamp: new Date().toISOString()
-        }
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     // For partial backups, validate collections
-    if (type === 'partial') {
+    if (type === "partial") {
       if (!Array.isArray(collections) || collections.length === 0) {
         return res.status(400).json({
           success: false,
           error: {
-            code: 'MISSING_COLLECTIONS',
-            message: 'At least one collection must be selected for partial backup',
-            timestamp: new Date().toISOString()
-          }
+            code: "MISSING_COLLECTIONS",
+            message: "At least one collection must be selected for partial backup",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
       // Validate collection names
-      const validCollections = ['users', 'questions', 'results', 'pdflibrary', 'contacts'];
-      const invalidCollections = collections.filter(c => !validCollections.includes(c));
+      const validCollections = ["users", "questions", "results", "pdflibrary", "contacts"];
+      const invalidCollections = collections.filter((c) => !validCollections.includes(c));
 
       if (invalidCollections.length > 0) {
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_COLLECTIONS',
-            message: `Invalid collection names: ${invalidCollections.join(', ')}. Valid collections are: ${validCollections.join(', ')}`,
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_COLLECTIONS",
+            message: `Invalid collection names: ${invalidCollections.join(", ")}. Valid collections are: ${validCollections.join(", ")}`,
+            timestamp: new Date().toISOString(),
+          },
         });
       }
     }
 
-    // Verify S3 connection
-    const s3Valid = await backupService.validateS3Connection();
-    if (!s3Valid) {
+    // Verify storage connection
+    const storageValid = await backupService.validateStorageConnection();
+    if (!storageValid) {
       return res.status(503).json({
         success: false,
         error: {
-          code: 'S3_UNAVAILABLE',
-          message: 'S3 service is not available. Please check AWS credentials configuration.',
-          timestamp: new Date().toISOString()
-        }
+          code: "STORAGE_UNAVAILABLE",
+          message: "Storage service is not available. Please check Supabase configuration.",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     // Create appropriate backup type
     let backup;
-    if (type === 'full') {
-      backup = await backupService.createFullBackup(req.user.id, 'manual');
+    if (type === "full") {
+      backup = await backupService.createFullBackup(req.user.id, "manual");
     } else {
-      backup = await backupService.createPartialBackup(collections, req.user.id, 'manual');
+      backup = await backupService.createPartialBackup(collections, req.user.id, "manual");
     }
 
-    Logger.info('Backup created successfully', {
+    Logger.info("Backup created successfully", {
       backupId: backup._id,
       type: backup.type,
       createdBy: req.user.id,
       fileSize: backup.fileSize,
-      recordCount: backup.recordCount
+      recordCount: backup.recordCount,
     });
 
     res.json({
       success: true,
-      message: 'Backup created successfully',
+      message: "Backup created successfully",
       data: {
         backup: {
           _id: backup._id,
@@ -233,33 +232,33 @@ router.post('/backups/create', auditLogger('backup_created', 'backup'), async (r
           recordCount: backup.recordCount,
           collections: backup.collections,
           createdAt: backup.createdAt,
-          completedAt: backup.completedAt
-        }
-      }
+          completedAt: backup.completedAt,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Backup creation error', {
+    Logger.error("Backup creation error", {
       error: err.message,
       userId: req.user.id,
-      stack: err.stack
+      stack: err.stack,
     });
 
     res.status(500).json({
       success: false,
       error: {
-        code: 'BACKUP_CREATE_ERROR',
-        message: err.message || 'Failed to create backup',
-        timestamp: new Date().toISOString()
-      }
+        code: "BACKUP_CREATE_ERROR",
+        message: err.message || "Failed to create backup",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // Restore a backup - SUPERADMIN ONLY with audit log
-router.post('/backups/:id/restore',
+router.post(
+  "/backups/:id/restore",
   superAdminAuth,
-  auditLogger('backup_restored', 'backup'),
+  auditLogger("backup_restored", "backup"),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -269,10 +268,10 @@ router.post('/backups/:id/restore',
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_ID',
-            message: 'Invalid backup ID format',
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_ID",
+            message: "Invalid backup ID format",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
@@ -282,45 +281,45 @@ router.post('/backups/:id/restore',
         return res.status(404).json({
           success: false,
           error: {
-            code: 'BACKUP_NOT_FOUND',
-            message: 'Backup not found',
-            timestamp: new Date().toISOString()
-          }
+            code: "BACKUP_NOT_FOUND",
+            message: "Backup not found",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
       // Check backup status
-      if (backup.status !== 'completed') {
+      if (backup.status !== "completed") {
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_BACKUP_STATUS',
+            code: "INVALID_BACKUP_STATUS",
             message: `Cannot restore backup with status: ${backup.status}. Only completed backups can be restored.`,
-            timestamp: new Date().toISOString()
-          }
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
-      Logger.warn('Starting backup restoration', {
+      Logger.warn("Starting backup restoration", {
         backupId: id,
         backupType: backup.type,
         restoredBy: req.user.id,
         collections: backup.collections,
-        recordCount: backup.recordCount
+        recordCount: backup.recordCount,
       });
 
       // Start restore process
       const restoredBackup = await backupService.restoreBackup(id, req.user.id);
 
-      Logger.info('Backup restoration completed', {
+      Logger.info("Backup restoration completed", {
         backupId: id,
         restoredBy: req.user.id,
-        status: restoredBackup.status
+        status: restoredBackup.status,
       });
 
       res.json({
         success: true,
-        message: 'Backup restored successfully',
+        message: "Backup restored successfully",
         data: {
           backup: {
             _id: restoredBackup._id,
@@ -329,34 +328,34 @@ router.post('/backups/:id/restore',
             recordCount: restoredBackup.recordCount,
             restoredAt: restoredBackup.restoredAt,
             restoredBy: restoredBackup.restoredBy,
-            restoreMetadata: restoredBackup.restoreMetadata
-          }
-        }
+            restoreMetadata: restoredBackup.restoreMetadata,
+          },
+        },
       });
-
     } catch (err) {
-      Logger.error('Backup restoration error', {
+      Logger.error("Backup restoration error", {
         error: err.message,
         backupId: req.params.id,
         userId: req.user.id,
-        stack: err.stack
+        stack: err.stack,
       });
 
       res.status(500).json({
         success: false,
         error: {
-          code: 'BACKUP_RESTORE_ERROR',
-          message: err.message || 'Failed to restore backup',
-          timestamp: new Date().toISOString()
-        }
+          code: "BACKUP_RESTORE_ERROR",
+          message: err.message || "Failed to restore backup",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-  }
+  },
 );
 
 // Download backup metadata/info
-router.get('/backups/:id/download',
-  auditLogger('backup_downloaded', 'backup'),
+router.get(
+  "/backups/:id/download",
+  auditLogger("backup_downloaded", "backup"),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -366,26 +365,26 @@ router.get('/backups/:id/download',
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_ID',
-            message: 'Invalid backup ID format',
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_ID",
+            message: "Invalid backup ID format",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
       // Get backup with populated user info
       const backup = await BackupHistory.findById(id)
-        .populate('initiatedBy', 'username email')
-        .populate('createdBy', 'username email');
+        .populate("initiatedBy", "username email")
+        .populate("createdBy", "username email");
 
       if (!backup) {
         return res.status(404).json({
           success: false,
           error: {
-            code: 'BACKUP_NOT_FOUND',
-            message: 'Backup not found',
-            timestamp: new Date().toISOString()
-          }
+            code: "BACKUP_NOT_FOUND",
+            message: "Backup not found",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
@@ -394,17 +393,17 @@ router.get('/backups/:id/download',
         return res.status(400).json({
           success: false,
           error: {
-            code: 'NO_S3_URL',
-            message: 'S3 URL not available for this backup',
-            timestamp: new Date().toISOString()
-          }
+            code: "NO_S3_URL",
+            message: "S3 URL not available for this backup",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
-      Logger.info('Backup download metadata requested', {
+      Logger.info("Backup download metadata requested", {
         backupId: id,
         requestedBy: req.user.id,
-        backupType: backup.type
+        backupType: backup.type,
       });
 
       // Return backup metadata and download info
@@ -422,41 +421,41 @@ router.get('/backups/:id/download',
             completedAt: backup.completedAt,
             createdBy: backup.createdBy,
             initiatedBy: backup.initiatedBy,
-            metadata: backup.metadata
+            metadata: backup.metadata,
           },
           download: {
             url: backup.s3Url,
             fileName: `backup_${backup.type}_${backup._id}_${new Date(backup.createdAt).getTime()}.json.gz`,
             fileSize: backup.fileSize,
-            contentType: 'application/gzip',
-            instructions: 'Download and decompress using gunzip to restore locally'
-          }
-        }
+            contentType: "application/gzip",
+            instructions: "Download and decompress using gunzip to restore locally",
+          },
+        },
       });
-
     } catch (err) {
-      Logger.error('Backup download error', {
+      Logger.error("Backup download error", {
         error: err.message,
         backupId: req.params.id,
-        userId: req.user.id
+        userId: req.user.id,
       });
 
       res.status(500).json({
         success: false,
         error: {
-          code: 'DOWNLOAD_ERROR',
-          message: 'Failed to generate download metadata',
-          timestamp: new Date().toISOString()
-        }
+          code: "DOWNLOAD_ERROR",
+          message: "Failed to generate download metadata",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-  }
+  },
 );
 
 // Delete a backup - SUPERADMIN ONLY
-router.delete('/backups/:id',
+router.delete(
+  "/backups/:id",
   superAdminAuth,
-  auditLogger('backup_deleted', 'backup'),
+  auditLogger("backup_deleted", "backup"),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -466,10 +465,10 @@ router.delete('/backups/:id',
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_ID',
-            message: 'Invalid backup ID format',
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_ID",
+            message: "Invalid backup ID format",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
@@ -479,59 +478,58 @@ router.delete('/backups/:id',
         return res.status(404).json({
           success: false,
           error: {
-            code: 'BACKUP_NOT_FOUND',
-            message: 'Backup not found',
-            timestamp: new Date().toISOString()
-          }
+            code: "BACKUP_NOT_FOUND",
+            message: "Backup not found",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
-      Logger.info('Starting backup deletion', {
+      Logger.info("Starting backup deletion", {
         backupId: id,
         deletedBy: req.user.id,
         backupType: backup.type,
-        fileSize: backup.fileSize
+        fileSize: backup.fileSize,
       });
 
       // Delete backup from S3 and database
       await backupService.deleteBackup(id, req.user.id);
 
-      Logger.info('Backup deleted successfully', {
+      Logger.info("Backup deleted successfully", {
         backupId: id,
-        deletedBy: req.user.id
+        deletedBy: req.user.id,
       });
 
       res.json({
         success: true,
-        message: 'Backup deleted successfully',
+        message: "Backup deleted successfully",
         data: {
           backupId: id,
-          timestamp: new Date().toISOString()
-        }
+          timestamp: new Date().toISOString(),
+        },
       });
-
     } catch (err) {
-      Logger.error('Backup deletion error', {
+      Logger.error("Backup deletion error", {
         error: err.message,
         backupId: req.params.id,
         userId: req.user.id,
-        stack: err.stack
+        stack: err.stack,
       });
 
       res.status(500).json({
         success: false,
         error: {
-          code: 'BACKUP_DELETE_ERROR',
-          message: err.message || 'Failed to delete backup',
-          timestamp: new Date().toISOString()
-        }
+          code: "BACKUP_DELETE_ERROR",
+          message: err.message || "Failed to delete backup",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-  }
+  },
 );
 
 // Get backup statistics
-router.get('/backups/stats/overview', async (req, res) => {
+router.get("/backups/stats/overview", async (req, res) => {
   try {
     const stats = await backupService.getBackupStats();
 
@@ -544,54 +542,54 @@ router.get('/backups/stats/overview', async (req, res) => {
           byStatus: stats.byStatus || {},
           byType: stats.byType || {},
           latest: stats.latest,
-          oldestCompleted: stats.oldestCompleted
-        }
-      }
+          oldestCompleted: stats.oldestCompleted,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Backup stats error', { error: err.message });
+    Logger.error("Backup stats error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'BACKUP_STATS_ERROR',
-        message: 'Failed to fetch backup statistics',
-        timestamp: new Date().toISOString()
-      }
+        code: "BACKUP_STATS_ERROR",
+        message: "Failed to fetch backup statistics",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // Cleanup old backups (manual trigger)
-router.post('/backups/cleanup/old',
+router.post(
+  "/backups/cleanup/old",
   superAdminAuth,
-  auditLogger('backup_cleanup_triggered', 'backup'),
+  auditLogger("backup_cleanup_triggered", "backup"),
   async (req, res) => {
     try {
       const { daysToKeep = 30 } = req.body;
 
-      if (typeof daysToKeep !== 'number' || daysToKeep < 7) {
+      if (typeof daysToKeep !== "number" || daysToKeep < 7) {
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_DAYS',
-            message: 'daysToKeep must be a number >= 7',
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_DAYS",
+            message: "daysToKeep must be a number >= 7",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
-      Logger.info('Starting backup cleanup', {
+      Logger.info("Starting backup cleanup", {
         daysToKeep,
-        triggeredBy: req.user.id
+        triggeredBy: req.user.id,
       });
 
       const result = await backupService.deleteOldBackups(daysToKeep);
 
-      Logger.info('Backup cleanup completed', {
+      Logger.info("Backup cleanup completed", {
         deletedCount: result.deletedCount,
         failedCount: result.failedCount,
-        triggeredBy: req.user.id
+        triggeredBy: req.user.id,
       });
 
       res.json({
@@ -600,55 +598,61 @@ router.post('/backups/cleanup/old',
         data: {
           deletedCount: result.deletedCount,
           failedCount: result.failedCount,
-          daysToKeep
-        }
+          daysToKeep,
+        },
       });
-
     } catch (err) {
-      Logger.error('Backup cleanup error', {
+      Logger.error("Backup cleanup error", {
         error: err.message,
-        userId: req.user.id
+        userId: req.user.id,
       });
 
       res.status(500).json({
         success: false,
         error: {
-          code: 'CLEANUP_ERROR',
-          message: err.message || 'Failed to cleanup old backups',
-          timestamp: new Date().toISOString()
-        }
+          code: "CLEANUP_ERROR",
+          message: err.message || "Failed to cleanup old backups",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-  }
+  },
 );
 
 // ===== ADMIN DASHBOARD =====
-router.get('/dashboard', async (req, res) => {
+router.get("/dashboard", async (req, res) => {
   try {
     // Safely get all counts with fallbacks
     const results = await Promise.allSettled([
-      User.countDocuments({ isDeleted: { $ne: true } }),                    // 0: totalUsers
-      User.countDocuments({ isActive: true, isDeleted: { $ne: true } }),   // 1: activeUsers
-      PdfLibrary.countDocuments().catch(() => 0),                           // 2: totalUploads
-      Question.countDocuments().catch(() => 0),                             // 3: totalQuestions
-      Result.countDocuments().catch(() => 0),                               // 4: totalResults
-      Contact.countDocuments({ status: 'new' }).catch(() => 0),            // 5: pendingContacts
-      User.countDocuments({                                                 // 6: recentSignups
+      User.countDocuments({ isDeleted: { $ne: true } }), // 0: totalUsers
+      User.countDocuments({ isActive: true, isDeleted: { $ne: true } }), // 1: activeUsers
+      PdfLibrary.countDocuments().catch(() => 0), // 2: totalUploads
+      Question.countDocuments().catch(() => 0), // 3: totalQuestions
+      Result.countDocuments().catch(() => 0), // 4: totalResults
+      Contact.countDocuments({ status: "new" }).catch(() => 0), // 5: pendingContacts
+      User.countDocuments({
+        // 6: recentSignups
         createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-        isDeleted: { $ne: true }
+        isDeleted: { $ne: true },
       }).catch(() => 0),
-      PdfLibrary.aggregate([                                                // 7: storageUsed
-        { $group: { _id: null, totalSize: { $sum: '$fileSize' } } }
+      PdfLibrary.aggregate([
+        // 7: storageUsed
+        { $group: { _id: null, totalSize: { $sum: "$fileSize" } } },
       ]).catch(() => []),
-      SystemAlert ? SystemAlert.countDocuments({ status: 'active' }).catch(() => 0) : Promise.resolve(0), // 8: activeAlerts
-      ApiUsage ? ApiUsage.countDocuments({                                  // 9: todayApiCalls
-        timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-      }).catch(() => 0) : Promise.resolve(0)
+      SystemAlert
+        ? SystemAlert.countDocuments({ status: "active" }).catch(() => 0)
+        : Promise.resolve(0), // 8: activeAlerts
+      ApiUsage
+        ? ApiUsage.countDocuments({
+            // 9: todayApiCalls
+            timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          }).catch(() => 0)
+        : Promise.resolve(0),
     ]);
 
     // Extract values safely
     const getValue = (result, defaultVal = 0) =>
-      result.status === 'fulfilled' ? result.value : defaultVal;
+      result.status === "fulfilled" ? result.value : defaultVal;
 
     const totalUsers = getValue(results[0]);
     const activeUsers = getValue(results[1]);
@@ -668,19 +672,19 @@ router.get('/dashboard', async (req, res) => {
         {
           $match: {
             createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-            isDeleted: { $ne: true }
-          }
+            isDeleted: { $ne: true },
+          },
         },
         {
           $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            count: { $sum: 1 }
-          }
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 },
+          },
         },
-        { $sort: { _id: 1 } }
+        { $sort: { _id: 1 } },
       ]);
     } catch (err) {
-      Logger.warn('User growth aggregation failed:', err.message);
+      Logger.warn("User growth aggregation failed:", err.message);
     }
 
     // Top uploaders
@@ -689,34 +693,34 @@ router.get('/dashboard', async (req, res) => {
       topUploaders = await PdfLibrary.aggregate([
         {
           $group: {
-            _id: '$userId',
+            _id: "$userId",
             uploadCount: { $sum: 1 },
-            questionCount: { $sum: '$numberOfQuestions' }
-          }
+            questionCount: { $sum: "$numberOfQuestions" },
+          },
         },
         { $sort: { uploadCount: -1 } },
         { $limit: 10 },
         {
           $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'user'
-          }
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "user",
+          },
         },
-        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
         {
           $project: {
-            userId: '$_id',
-            username: { $ifNull: ['$user.username', 'Unknown'] },
-            email: { $ifNull: ['$user.email', 'Unknown'] },
+            userId: "$_id",
+            username: { $ifNull: ["$user.username", "Unknown"] },
+            email: { $ifNull: ["$user.email", "Unknown"] },
             uploadCount: 1,
-            questionCount: 1
-          }
-        }
+            questionCount: 1,
+          },
+        },
       ]);
     } catch (err) {
-      Logger.warn('Top uploaders aggregation failed:', err.message);
+      Logger.warn("Top uploaders aggregation failed:", err.message);
     }
 
     // Exam stats
@@ -726,18 +730,18 @@ router.get('/dashboard', async (req, res) => {
         {
           $group: {
             _id: null,
-            avgPercentage: { $avg: '$percentage' },
+            avgPercentage: { $avg: "$percentage" },
             totalExams: { $sum: 1 },
-            avgScore: { $avg: '$score' },
-            avgTotal: { $avg: '$totalQuestions' }
-          }
-        }
+            avgScore: { $avg: "$score" },
+            avgTotal: { $avg: "$totalQuestions" },
+          },
+        },
       ]);
       if (stats.length > 0) {
         examStats = stats;
       }
     } catch (err) {
-      Logger.warn('Exam stats aggregation failed:', err.message);
+      Logger.warn("Exam stats aggregation failed:", err.message);
     }
 
     // Recent activity
@@ -747,22 +751,22 @@ router.get('/dashboard', async (req, res) => {
         recentActivity = await AuditLog.find()
           .sort({ createdAt: -1 })
           .limit(10)
-          .populate('userId', 'username email')
+          .populate("userId", "username email")
           .lean();
       }
     } catch (err) {
-      Logger.warn('Recent activity fetch failed:', err.message);
+      Logger.warn("Recent activity fetch failed:", err.message);
     }
 
     // Count admin users
     let adminCount = 0;
     try {
       adminCount = await User.countDocuments({
-        role: { $in: ['admin', 'superadmin'] },
-        isDeleted: { $ne: true }
+        role: { $in: ["admin", "superadmin"] },
+        isDeleted: { $ne: true },
       });
     } catch (err) {
-      Logger.warn('Admin count failed:', err.message);
+      Logger.warn("Admin count failed:", err.message);
     }
 
     // Recent users (for frontend display)
@@ -771,10 +775,10 @@ router.get('/dashboard', async (req, res) => {
       recentUsers = await User.find({ isDeleted: { $ne: true } })
         .sort({ createdAt: -1 })
         .limit(5)
-        .select('username email role isActive createdAt')
+        .select("username email role isActive createdAt")
         .lean();
     } catch (err) {
-      Logger.warn('Recent users fetch failed:', err.message);
+      Logger.warn("Recent users fetch failed:", err.message);
     }
 
     // Count total contacts
@@ -782,7 +786,7 @@ router.get('/dashboard', async (req, res) => {
     try {
       totalContacts = await Contact.countDocuments();
     } catch (err) {
-      Logger.warn('Total contacts count failed:', err.message);
+      Logger.warn("Total contacts count failed:", err.message);
     }
 
     res.json({
@@ -802,46 +806,45 @@ router.get('/dashboard', async (req, res) => {
           todayApiCalls,
           adminCount,
           totalContacts,
-          inactiveUsers: totalUsers - activeUsers
+          inactiveUsers: totalUsers - activeUsers,
         },
         charts: {
           userGrowth,
-          topUploaders
+          topUploaders,
         },
         recentActivity,
         recentUsers,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     });
-
   } catch (err) {
-    Logger.error('Admin Dashboard error', {
+    Logger.error("Admin Dashboard error", {
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
 
     res.status(500).json({
       success: false,
       error: {
-        code: 'DASHBOARD_ERROR',
-        message: err.message || 'Failed to fetch dashboard stats',
-        timestamp: new Date().toISOString()
-      }
+        code: "DASHBOARD_ERROR",
+        message: err.message || "Failed to fetch dashboard stats",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== USER MANAGEMENT =====
-router.get('/users', async (req, res) => {
+router.get("/users", async (req, res) => {
   try {
     const {
       page = 1,
       limit = 20,
-      search = '',
-      role = '',
-      status = '',
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
+      search = "",
+      role = "",
+      status = "",
+      sortBy = "createdAt",
+      sortOrder = "desc",
     } = req.query;
 
     const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
@@ -849,26 +852,21 @@ router.get('/users', async (req, res) => {
 
     if (search) {
       filter.$or = [
-        { username: new RegExp(search, 'i') },
-        { email: new RegExp(search, 'i') },
-        { fullname: new RegExp(search, 'i') }
+        { username: new RegExp(search, "i") },
+        { email: new RegExp(search, "i") },
+        { fullname: new RegExp(search, "i") },
       ];
     }
 
     if (role) filter.role = role;
-    if (status === 'active') filter.isActive = true;
-    if (status === 'inactive') filter.isActive = false;
+    if (status === "active") filter.isActive = true;
+    if (status === "inactive") filter.isActive = false;
 
-    const sort = { [sortBy]: sortOrder === 'asc' ? 1 : -1 };
+    const sort = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
 
     const [users, total] = await Promise.all([
-      User.find(filter)
-        .select('-password')
-        .sort(sort)
-        .skip(skip)
-        .limit(safeLimit)
-        .lean(),
-      User.countDocuments(filter)
+      User.find(filter).select("-password").sort(sort).skip(skip).limit(safeLimit).lean(),
+      User.countDocuments(filter),
     ]);
 
     // Enrich with stats
@@ -880,8 +878,8 @@ router.get('/users', async (req, res) => {
           Result.countDocuments({ userId: user._id }),
           AuditLog.findOne({ userId: user._id })
             .sort({ createdAt: -1 })
-            .select('createdAt action')
-            .lean()
+            .select("createdAt action")
+            .lean(),
         ]);
 
         return {
@@ -889,11 +887,11 @@ router.get('/users', async (req, res) => {
           stats: {
             uploads,
             questions,
-            examsTaken: results
+            examsTaken: results,
           },
-          lastActivity: lastActivity?.createdAt || user.lastLogin
+          lastActivity: lastActivity?.createdAt || user.lastLogin,
         };
-      })
+      }),
     );
 
     res.json({
@@ -904,66 +902,50 @@ router.get('/users', async (req, res) => {
           currentPage: safePage,
           totalPages: Math.ceil(total / safeLimit),
           totalUsers: total,
-          usersPerPage: safeLimit
-        }
-      }
+          usersPerPage: safeLimit,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Admin users fetch error', { error: err.message });
+    Logger.error("Admin users fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'USERS_FETCH_ERROR',
-        message: 'Failed to fetch users',
-        timestamp: new Date().toISOString()
-      }
+        code: "USERS_FETCH_ERROR",
+        message: "Failed to fetch users",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
-router.get('/users/:id', async (req, res) => {
+router.get("/users/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await User.findById(id).select('-password').lean();
+    const user = await User.findById(id).select("-password").lean();
 
     if (!user) {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-          timestamp: new Date().toISOString()
-        }
+          code: "USER_NOT_FOUND",
+          message: "User not found",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     // Get detailed stats
-    const [
-      uploads,
-      questions,
-      exams,
-      recentActivity,
-      avgScore
-    ] = await Promise.all([
-      PdfLibrary.find({ userId: user._id })
-        .sort({ uploadedAt: -1 })
-        .limit(10)
-        .lean(),
+    const [uploads, questions, exams, recentActivity, avgScore] = await Promise.all([
+      PdfLibrary.find({ userId: user._id }).sort({ uploadedAt: -1 }).limit(10).lean(),
       Question.countDocuments({ userId: user._id }),
-      Result.find({ userId: user._id })
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean(),
-      AuditLog.find({ userId: user._id })
-        .sort({ createdAt: -1 })
-        .limit(20)
-        .lean(),
+      Result.find({ userId: user._id }).sort({ createdAt: -1 }).limit(10).lean(),
+      AuditLog.find({ userId: user._id }).sort({ createdAt: -1 }).limit(20).lean(),
       Result.aggregate([
         { $match: { userId: new mongoose.Types.ObjectId(id) } },
-        { $group: { _id: null, avg: { $avg: '$percentage' } } }
-      ])
+        { $group: { _id: null, avg: { $avg: "$percentage" } } },
+      ]),
     ]);
 
     res.json({
@@ -975,178 +957,187 @@ router.get('/users/:id', async (req, res) => {
             totalUploads: uploads.length,
             totalQuestions: questions,
             totalExams: exams.length,
-            avgScore: Math.round(avgScore[0]?.avg || 0)
-          }
+            avgScore: Math.round(avgScore[0]?.avg || 0),
+          },
         },
         uploads,
         exams,
-        recentActivity
-      }
-    });
-
-  } catch (err) {
-    Logger.error('User detail fetch error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'USER_DETAIL_ERROR',
-        message: 'Failed to fetch user details',
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
-
-router.patch('/users/:id/role', superAdminAuth, auditLogger('user_role_changed', 'user'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { role } = req.body;
-
-    if (!['user', 'admin', 'superadmin'].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_ROLE',
-          message: 'Invalid role value',
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-
-    // Increment tokenVersion to invalidate all existing tokens for this user
-    const TokenService = require('../services/tokenService');
-    await TokenService.revokeAllUserTokens(id);
-
-    const user = await User.findByIdAndUpdate(
-      id,
-      {
-        role,
-        updatedAt: new Date(),
-        $inc: { tokenVersion: 1 } // Increment version to invalidate tokens
+        recentActivity,
       },
-      { new: true }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-
-    Logger.info('User role updated', {
-      userId: id,
-      newRole: role,
-      previousTokensInvalidated: true
     });
-
-    res.json({
-      success: true,
-      data: {
-        user,
-        message: 'Role updated. User will need to log in again to apply changes.'
+  } catch (err) {
+    Logger.error("User detail fetch error", { error: err.message });
+    res.status(500).json({
+      success: false,
+      error: {
+        code: "USER_DETAIL_ERROR",
+        message: "Failed to fetch user details",
+        timestamp: new Date().toISOString(),
       },
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (err) {
-    Logger.error('User role update error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'ROLE_UPDATE_ERROR',
-        message: 'Failed to update user role',
-        timestamp: new Date().toISOString()
-      }
     });
   }
 });
 
-router.patch('/users/:id/status', auditLogger('user_status_changed', 'user'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { isActive } = req.body;
+router.patch(
+  "/users/:id/role",
+  superAdminAuth,
+  auditLogger("user_role_changed", "user"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
 
-    const user = await User.findByIdAndUpdate(
-      id,
-      { isActive, updatedAt: new Date() },
-      { new: true }
-    ).select('-password');
+      if (!["user", "admin", "superadmin"].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_ROLE",
+            message: "Invalid role value",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
 
-    if (!user) {
-      return res.status(404).json({
+      // Increment tokenVersion to invalidate all existing tokens for this user
+      const TokenService = require("../services/tokenService");
+      await TokenService.revokeAllUserTokens(id);
+
+      const user = await User.findByIdAndUpdate(
+        id,
+        {
+          role,
+          updatedAt: new Date(),
+          $inc: { tokenVersion: 1 }, // Increment version to invalidate tokens
+        },
+        { new: true },
+      ).select("-password");
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "USER_NOT_FOUND",
+            message: "User not found",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      Logger.info("User role updated", {
+        userId: id,
+        newRole: role,
+        previousTokensInvalidated: true,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          user,
+          message: "Role updated. User will need to log in again to apply changes.",
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err) {
+      Logger.error("User role update error", { error: err.message });
+      res.status(500).json({
         success: false,
         error: {
-          code: 'USER_NOT_FOUND',
-          message: 'User not found',
-          timestamp: new Date().toISOString()
-        }
+          code: "ROLE_UPDATE_ERROR",
+          message: "Failed to update user role",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-    res.json({
-      success: true,
-      data: { user }
-    });
+  },
+);
 
-  } catch (err) {
-    Logger.error('User status update error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'STATUS_UPDATE_ERROR',
-        message: 'Failed to update user status',
-        timestamp: new Date().toISOString()
+router.patch(
+  "/users/:id/status",
+  auditLogger("user_status_changed", "user"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { isActive } = req.body;
+
+      const user = await User.findByIdAndUpdate(
+        id,
+        { isActive, updatedAt: new Date() },
+        { new: true },
+      ).select("-password");
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "USER_NOT_FOUND",
+            message: "User not found",
+            timestamp: new Date().toISOString(),
+          },
+        });
       }
-    });
-  }
-});
-
-router.delete('/users/:id', superAdminAuth, auditLogger('user_deleted', 'user'), async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Soft-delete user (consistent with bulk delete)
-    const user = await User.findByIdAndUpdate(
-      id,
-      { isDeleted: true, deletedAt: new Date() },
-      { new: true }
-    );
-    if (!user) {
-      return res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+      res.json({
+        success: true,
+        data: { user },
+      });
+    } catch (err) {
+      Logger.error("User status update error", { error: err.message });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "STATUS_UPDATE_ERROR",
+          message: "Failed to update user status",
+          timestamp: new Date().toISOString(),
+        },
+      });
     }
+  },
+);
 
-    res.json({
-      success: true,
-      message: 'User soft-deleted successfully'
-    });
+router.delete(
+  "/users/:id",
+  superAdminAuth,
+  auditLogger("user_deleted", "user"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
 
-  } catch (err) {
-    Logger.error('User deletion error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'USER_DELETE_ERROR',
-        message: 'Failed to delete user',
-        timestamp: new Date().toISOString()
+      // Soft-delete user (consistent with bulk delete)
+      const user = await User.findByIdAndUpdate(
+        id,
+        { isDeleted: true, deletedAt: new Date() },
+        { new: true },
+      );
+      if (!user) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            error: { code: "USER_NOT_FOUND", message: "User not found" },
+          });
       }
-    });
-  }
-});
+
+      res.json({
+        success: true,
+        message: "User soft-deleted successfully",
+      });
+    } catch (err) {
+      Logger.error("User deletion error", { error: err.message });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "USER_DELETE_ERROR",
+          message: "Failed to delete user",
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  },
+);
 
 // ===== CONTACT MANAGEMENT =====
-router.get('/contacts', async (req, res) => {
+router.get("/contacts", async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 20,
-      status = '',
-      priority = '',
-      category = ''
-    } = req.query;
+    const { page = 1, limit = 20, status = "", priority = "", category = "" } = req.query;
 
     const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
     const filter = {};
@@ -1160,12 +1151,10 @@ router.get('/contacts', async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit)
-        .populate('resolvedBy', 'username email')
+        .populate("resolvedBy", "username email")
         .lean(),
       Contact.countDocuments(filter),
-      Contact.aggregate([
-        { $group: { _id: '$status', count: { $sum: 1 } } }
-      ])
+      Contact.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
     ]);
 
     res.json({
@@ -1176,40 +1165,39 @@ router.get('/contacts', async (req, res) => {
           currentPage: safePage,
           totalPages: Math.ceil(total / safeLimit),
           totalContacts: total,
-          contactsPerPage: safeLimit
+          contactsPerPage: safeLimit,
         },
         statusCounts: statusCounts.reduce((acc, item) => {
           acc[item._id] = item.count;
           return acc;
-        }, {})
-      }
+        }, {}),
+      },
     });
-
   } catch (err) {
-    Logger.error('Contacts fetch error', { error: err.message });
+    Logger.error("Contacts fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'CONTACTS_FETCH_ERROR',
-        message: 'Failed to fetch contacts',
-        timestamp: new Date().toISOString()
-      }
+        code: "CONTACTS_FETCH_ERROR",
+        message: "Failed to fetch contacts",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
-router.patch('/contacts/:id', auditLogger('contact_updated', 'contact'), async (req, res) => {
+router.patch("/contacts/:id", auditLogger("contact_updated", "contact"), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, priority, category, adminNotes, sendResponse } = req.body;
 
     const updateData = {
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
     if (status) {
       updateData.status = status;
-      if (status === 'resolved') {
+      if (status === "resolved") {
         updateData.resolvedBy = req.user.id;
         updateData.resolvedAt = new Date();
       }
@@ -1218,20 +1206,19 @@ router.patch('/contacts/:id', auditLogger('contact_updated', 'contact'), async (
     if (category) updateData.category = category;
     if (adminNotes) updateData.adminNotes = adminNotes;
 
-    const contact = await Contact.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true }
-    ).populate('resolvedBy', 'username email');
+    const contact = await Contact.findByIdAndUpdate(id, updateData, { new: true }).populate(
+      "resolvedBy",
+      "username email",
+    );
 
     if (!contact) {
       return res.status(404).json({
         success: false,
         error: {
-          code: 'CONTACT_NOT_FOUND',
-          message: 'Contact message not found',
-          timestamp: new Date().toISOString()
-        }
+          code: "CONTACT_NOT_FOUND",
+          message: "Contact message not found",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
@@ -1242,25 +1229,25 @@ router.patch('/contacts/:id', auditLogger('contact_updated', 'contact'), async (
 
     res.json({
       success: true,
-      data: { contact }
+      data: { contact },
     });
-
   } catch (err) {
-    Logger.error('Contact update error', { error: err.message });
+    Logger.error("Contact update error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'CONTACT_UPDATE_ERROR',
-        message: 'Failed to update contact',
-        timestamp: new Date().toISOString()
-      }
+        code: "CONTACT_UPDATE_ERROR",
+        message: "Failed to update contact",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== RESPOND TO CONTACT =====
-router.post('/contacts/:id/respond',
-  auditLogger('contact_responded', 'contact'),
+router.post(
+  "/contacts/:id/respond",
+  auditLogger("contact_responded", "contact"),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -1270,10 +1257,10 @@ router.post('/contacts/:id/respond',
         return res.status(400).json({
           success: false,
           error: {
-            code: 'MISSING_RESPONSE',
-            message: 'Response message is required',
-            timestamp: new Date().toISOString()
-          }
+            code: "MISSING_RESPONSE",
+            message: "Response message is required",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
@@ -1284,16 +1271,16 @@ router.post('/contacts/:id/respond',
         return res.status(404).json({
           success: false,
           error: {
-            code: 'CONTACT_NOT_FOUND',
-            message: 'Contact message not found',
-            timestamp: new Date().toISOString()
-          }
+            code: "CONTACT_NOT_FOUND",
+            message: "Contact message not found",
+            timestamp: new Date().toISOString(),
+          },
         });
       }
 
       // Update contact with response
       contact.adminNotes = response.trim();
-      contact.status = 'resolved';
+      contact.status = "resolved";
       contact.resolvedBy = req.user.id;
       contact.resolvedAt = new Date();
       await contact.save();
@@ -1307,20 +1294,20 @@ router.post('/contacts/:id/respond',
             name: contact.name,
             email: contact.email,
             subject: contact.subject,
-            message: contact.message
+            message: contact.message,
           },
-          response.trim()
+          response.trim(),
         );
 
-        Logger.info('Contact response email sent', {
+        Logger.info("Contact response email sent", {
           contactId: contact._id,
           to: contact.email,
-          respondedBy: req.user.id
+          respondedBy: req.user.id,
         });
       } catch (emailError) {
-        Logger.error('Failed to send contact response email', {
+        Logger.error("Failed to send contact response email", {
           contactId: contact._id,
-          error: emailError.message
+          error: emailError.message,
         });
 
         // Don't fail the request if email fails, but inform the user
@@ -1328,9 +1315,9 @@ router.post('/contacts/:id/respond',
           success: true,
           data: {
             contact,
-            warning: 'Response saved but email notification failed to send'
+            warning: "Response saved but email notification failed to send",
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
       }
 
@@ -1338,43 +1325,42 @@ router.post('/contacts/:id/respond',
         success: true,
         data: {
           contact,
-          message: 'Response sent successfully'
+          message: "Response sent successfully",
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-
     } catch (err) {
-      Logger.error('Contact response error', { error: err.message });
+      Logger.error("Contact response error", { error: err.message });
       res.status(500).json({
         success: false,
         error: {
-          code: 'RESPONSE_ERROR',
-          message: 'Failed to send response',
-          timestamp: new Date().toISOString()
-        }
+          code: "RESPONSE_ERROR",
+          message: "Failed to send response",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-  }
+  },
 );
 
 // ===== SYSTEM HEALTH =====
-router.get('/system/health', async (req, res) => {
+router.get("/system/health", async (req, res) => {
   try {
-    const AlertService = require('../services/alertService');
+    const AlertService = require("../services/alertService");
 
     // Get service health checks
     const services = await AlertService.checkSystemHealth();
 
     // Get memory usage
     const memUsage = process.memoryUsage();
-    const totalMem = require('os').totalmem();
-    const freeMem = require('os').freemem();
+    const totalMem = require("os").totalmem();
+    const freeMem = require("os").freemem();
 
     // Determine overall status
-    let status = 'healthy';
-    if (!services.mongodb) status = 'down';
-    else if (!services.redis || !services.s3) status = 'degraded';
-    else if (!services.memory) status = 'degraded';
+    let status = "healthy";
+    if (!services.mongodb) status = "down";
+    else if (!services.redis || !services.storage) status = "degraded";
+    else if (!services.memory) status = "degraded";
 
     const healthData = {
       status,
@@ -1382,41 +1368,40 @@ router.get('/system/health', async (req, res) => {
       services: {
         mongodb: services.mongodb || false,
         redis: services.redis || false,
-        s3: services.s3 || false,
-        memory: services.memory || false
+        storage: services.storage || false,
+        memory: services.memory || false,
       },
       memory: {
         heapUsed: memUsage.heapUsed || 0,
         heapTotal: memUsage.heapTotal || 0,
         external: memUsage.external || 0,
         rss: memUsage.rss || 0,
-        percentUsed: Math.round(((totalMem - freeMem) / totalMem) * 100)
+        percentUsed: Math.round(((totalMem - freeMem) / totalMem) * 100),
       },
       uptime: process.uptime() || 0,
-      cpu: process.cpuUsage() || { user: 0, system: 0 }
+      cpu: process.cpuUsage() || { user: 0, system: 0 },
     };
 
     res.json({
       success: true,
-      data: healthData
+      data: healthData,
     });
-
   } catch (err) {
-    Logger.error('Health check error', { error: err.message });
+    Logger.error("Health check error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'HEALTH_CHECK_ERROR',
-        message: 'Failed to check system health'
-      }
+        code: "HEALTH_CHECK_ERROR",
+        message: "Failed to check system health",
+      },
     });
   }
 });
 
 // ===== SYSTEM ALERTS =====
-router.get('/system/alerts', async (req, res) => {
+router.get("/system/alerts", async (req, res) => {
   try {
-    const { severity = '', status = 'active', limit: rawLimit = 50 } = req.query;
+    const { severity = "", status = "active", limit: rawLimit = 50 } = req.query;
     const limit = Math.min(1000, Math.max(1, parseInt(rawLimit) || 50));
 
     const filter = {};
@@ -1427,11 +1412,9 @@ router.get('/system/alerts', async (req, res) => {
       SystemAlert.find(filter)
         .sort({ createdAt: -1 })
         .limit(limit)
-        .populate('resolvedBy', 'username email')
+        .populate("resolvedBy", "username email")
         .lean(),
-      SystemAlert.aggregate([
-        { $group: { _id: '$severity', count: { $sum: 1 } } }
-      ])
+      SystemAlert.aggregate([{ $group: { _id: "$severity", count: { $sum: 1 } } }]),
     ]);
 
     res.json({
@@ -1441,72 +1424,74 @@ router.get('/system/alerts', async (req, res) => {
         stats: stats.reduce((acc, item) => {
           acc[item._id] = item.count;
           return acc;
-        }, {})
-      }
+        }, {}),
+      },
     });
-
   } catch (err) {
-    Logger.error('Alerts fetch error', { error: err.message });
+    Logger.error("Alerts fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'ALERTS_FETCH_ERROR',
-        message: 'Failed to fetch alerts',
-        timestamp: new Date().toISOString()
-      }
+        code: "ALERTS_FETCH_ERROR",
+        message: "Failed to fetch alerts",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
-router.patch('/system/alerts/:id', auditLogger('alert_resolved', 'alert'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, resolution } = req.body;
+router.patch(
+  "/system/alerts/:id",
+  auditLogger("alert_resolved", "alert"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, resolution } = req.body;
 
-    const alert = await SystemAlert.findByIdAndUpdate(
-      id,
-      {
-        status,
-        resolution,
-        resolvedBy: req.user.id,
-        resolvedAt: new Date()
-      },
-      { new: true }
-    ).populate('resolvedBy', 'username email');
+      const alert = await SystemAlert.findByIdAndUpdate(
+        id,
+        {
+          status,
+          resolution,
+          resolvedBy: req.user.id,
+          resolvedAt: new Date(),
+        },
+        { new: true },
+      ).populate("resolvedBy", "username email");
 
-    if (!alert) {
-      return res.status(404).json({
+      if (!alert) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "ALERT_NOT_FOUND",
+            message: "Alert not found",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      res.json({
+        success: true,
+        data: { alert },
+      });
+    } catch (err) {
+      Logger.error("Alert update error", { error: err.message });
+      res.status(500).json({
         success: false,
         error: {
-          code: 'ALERT_NOT_FOUND',
-          message: 'Alert not found',
-          timestamp: new Date().toISOString()
-        }
+          code: "ALERT_UPDATE_ERROR",
+          message: "Failed to update alert",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
-
-    res.json({
-      success: true,
-      data: { alert }
-    });
-
-  } catch (err) {
-    Logger.error('Alert update error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'ALERT_UPDATE_ERROR',
-        message: 'Failed to update alert',
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
+  },
+);
 
 // ===== ANALYTICS =====
-router.get('/analytics', async (req, res) => {
+router.get("/analytics", async (req, res) => {
   try {
-    const { period = '30' } = req.query;
+    const { period = "30" } = req.query;
     const startDate = new Date(Date.now() - parseInt(period) * 24 * 60 * 60 * 1000);
 
     const [
@@ -1514,125 +1499,122 @@ router.get('/analytics', async (req, res) => {
       topicPopularity,
       examCompletionRate,
       peakUsageHours,
-      retentionData
+      retentionData,
     ] = await Promise.all([
       // Daily active users
       User.aggregate([
         {
           $match: {
-            lastLogin: { $gte: startDate }
-          }
+            lastLogin: { $gte: startDate },
+          },
         },
         {
           $group: {
             _id: {
-              $dateToString: { format: '%Y-%m-%d', date: '$lastLogin' }
+              $dateToString: { format: "%Y-%m-%d", date: "$lastLogin" },
             },
-            count: { $sum: 1 }
-          }
+            count: { $sum: 1 },
+          },
         },
-        { $sort: { _id: 1 } }
+        { $sort: { _id: 1 } },
       ]),
 
       // Topic popularity
       Question.aggregate([
         {
           $group: {
-            _id: '$topic',
+            _id: "$topic",
             questionCount: { $sum: 1 },
-            uniqueUsers: { $addToSet: '$userId' }
-          }
+            uniqueUsers: { $addToSet: "$userId" },
+          },
         },
         {
           $project: {
-            topic: '$_id',
+            topic: "$_id",
             questionCount: 1,
-            userCount: { $size: '$uniqueUsers' }
-          }
+            userCount: { $size: "$uniqueUsers" },
+          },
         },
         { $sort: { questionCount: -1 } },
-        { $limit: 10 }
+        { $limit: 10 },
       ]),
 
       // Exam completion rate
       Result.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $group: {
             _id: null,
             totalExams: { $sum: 1 },
             completedExams: {
-              $sum: { $cond: [{ $gte: ['$percentage', 50] }, 1, 0] }
+              $sum: { $cond: [{ $gte: ["$percentage", 50] }, 1, 0] },
             },
-            avgScore: { $avg: '$percentage' }
-          }
-        }
+            avgScore: { $avg: "$percentage" },
+          },
+        },
       ]),
 
       // Peak usage hours
       Result.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $group: {
-            _id: { $hour: '$createdAt' },
-            count: { $sum: 1 }
-          }
+            _id: { $hour: "$createdAt" },
+            count: { $sum: 1 },
+          },
         },
         { $sort: { count: -1 } },
-        { $limit: 5 }
+        { $limit: 5 },
       ]),
 
       // User retention
       User.aggregate([
         {
           $match: {
-            createdAt: { $gte: startDate }
-          }
+            createdAt: { $gte: startDate },
+          },
         },
         {
           $lookup: {
-            from: 'results',
-            localField: '_id',
-            foreignField: 'userId',
-            as: 'exams'
-          }
+            from: "results",
+            localField: "_id",
+            foreignField: "userId",
+            as: "exams",
+          },
         },
         {
           $group: {
             _id: {
-              $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+              $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
             },
             signups: { $sum: 1 },
             activeUsers: {
               $sum: {
-                $cond: [{ $gt: [{ $size: '$exams' }, 0] }, 1, 0]
-              }
-            }
-          }
+                $cond: [{ $gt: [{ $size: "$exams" }, 0] }, 1, 0],
+              },
+            },
+          },
         },
         {
           $project: {
-            date: '$_id',
+            date: "$_id",
             signups: 1,
             activeUsers: 1,
             retentionRate: {
-              $multiply: [
-                { $divide: ['$activeUsers', '$signups'] },
-                100
-              ]
-            }
-          }
+              $multiply: [{ $divide: ["$activeUsers", "$signups"] }, 100],
+            },
+          },
         },
-        { $sort: { date: 1 } }
-      ])
+        { $sort: { date: 1 } },
+      ]),
     ]);
 
     res.json({
@@ -1642,57 +1624,51 @@ router.get('/analytics', async (req, res) => {
           dailyActiveUsers,
           topicPopularity,
           examCompletionRate: examCompletionRate[0] || {},
-          peakUsageHours
+          peakUsageHours,
         },
         retention: retentionData,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     });
-
   } catch (err) {
-    Logger.error('Analytics fetch error', { error: err.message });
+    Logger.error("Analytics fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'ANALYTICS_ERROR',
-        message: 'Failed to fetch analytics',
-        timestamp: new Date().toISOString()
-      }
+        code: "ANALYTICS_ERROR",
+        message: "Failed to fetch analytics",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== API USAGE STATISTICS =====
-router.get('/api-usage', async (req, res) => {
+router.get("/api-usage", async (req, res) => {
   try {
-    const { period = '7' } = req.query;
+    const { period = "7" } = req.query;
     const startDate = new Date(Date.now() - parseInt(period) * 24 * 60 * 60 * 1000);
 
-    const [
-      endpointStats,
-      userStats,
-      errorStats,
-      timeSeriesData
-    ] = await Promise.all([
+    const [endpointStats, userStats, errorStats, timeSeriesData] = await Promise.all([
       // Most used endpoints
       ApiUsage.aggregate([
         {
           $match: {
-            timestamp: { $gte: startDate }
-          }
+            timestamp: { $gte: startDate },
+          },
         },
         {
           $group: {
-            _id: '$endpoint',
+            _id: "$endpoint",
             totalRequests: { $sum: 1 },
-            avgResponseTime: { $avg: '$responseTime' },
+            avgResponseTime: { $avg: "$responseTime" },
             errorCount: {
-              $sum: { $cond: [{ $gte: ['$statusCode', 400] }, 1, 0] }
-            }
-          }
+              $sum: { $cond: [{ $gte: ["$statusCode", 400] }, 1, 0] },
+            },
+          },
         },
         { $sort: { totalRequests: -1 } },
-        { $limit: 20 }
+        { $limit: 20 },
       ]),
 
       // Top API users
@@ -1700,34 +1676,34 @@ router.get('/api-usage', async (req, res) => {
         {
           $match: {
             timestamp: { $gte: startDate },
-            userId: { $exists: true }
-          }
+            userId: { $exists: true },
+          },
         },
         {
           $group: {
-            _id: '$userId',
-            requestCount: { $sum: 1 }
-          }
+            _id: "$userId",
+            requestCount: { $sum: 1 },
+          },
         },
         { $sort: { requestCount: -1 } },
         { $limit: 10 },
         {
           $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'user'
-          }
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "user",
+          },
         },
-        { $unwind: '$user' },
+        { $unwind: "$user" },
         {
           $project: {
-            userId: '$_id',
-            username: '$user.username',
-            email: '$user.email',
-            requestCount: 1
-          }
-        }
+            userId: "$_id",
+            username: "$user.username",
+            email: "$user.email",
+            requestCount: 1,
+          },
+        },
       ]),
 
       // Error breakdown
@@ -1735,40 +1711,40 @@ router.get('/api-usage', async (req, res) => {
         {
           $match: {
             timestamp: { $gte: startDate },
-            statusCode: { $gte: 400 }
-          }
+            statusCode: { $gte: 400 },
+          },
         },
         {
           $group: {
-            _id: '$statusCode',
+            _id: "$statusCode",
             count: { $sum: 1 },
-            endpoints: { $addToSet: '$endpoint' }
-          }
+            endpoints: { $addToSet: "$endpoint" },
+          },
         },
-        { $sort: { count: -1 } }
+        { $sort: { count: -1 } },
       ]),
 
       // Time series data
       ApiUsage.aggregate([
         {
           $match: {
-            timestamp: { $gte: startDate }
-          }
+            timestamp: { $gte: startDate },
+          },
         },
         {
           $group: {
             _id: {
               $dateToString: {
-                format: '%Y-%m-%d-%H',
-                date: '$timestamp'
-              }
+                format: "%Y-%m-%d-%H",
+                date: "$timestamp",
+              },
             },
             requests: { $sum: 1 },
-            avgResponseTime: { $avg: '$responseTime' }
-          }
+            avgResponseTime: { $avg: "$responseTime" },
+          },
         },
-        { $sort: { _id: 1 } }
-      ])
+        { $sort: { _id: 1 } },
+      ]),
     ]);
 
     res.json({
@@ -1781,38 +1757,39 @@ router.get('/api-usage', async (req, res) => {
         summary: {
           totalRequests: endpointStats.reduce((sum, e) => sum + e.totalRequests, 0),
           totalErrors: errorStats.reduce((sum, e) => sum + e.count, 0),
-          avgResponseTime: endpointStats.reduce((sum, e) => sum + e.avgResponseTime, 0) / (endpointStats.length || 1)
-        }
-      }
+          avgResponseTime:
+            endpointStats.reduce((sum, e) => sum + e.avgResponseTime, 0) /
+            (endpointStats.length || 1),
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('API usage stats error', { error: err.message });
+    Logger.error("API usage stats error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'API_USAGE_ERROR',
-        message: 'Failed to fetch API usage stats',
-        timestamp: new Date().toISOString()
-      }
+        code: "API_USAGE_ERROR",
+        message: "Failed to fetch API usage stats",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== CONTENT MODERATION =====
-router.get('/moderation/flagged', async (req, res) => {
+router.get("/moderation/flagged", async (req, res) => {
   try {
-    const { type = '', status = 'pending', limit = 50 } = req.query;
+    const { type = "", status = "pending", limit = 50 } = req.query;
 
     const filter = {
-      status: status
+      status: status,
     };
     if (type) filter.contentType = type;
 
     const flagged = await FlaggedContent.find(filter)
-      .populate('contentId')
-      .populate('flaggedBy', 'username email')
-      .populate('moderatedBy', 'username email')
+      .populate("contentId")
+      .populate("flaggedBy", "username email")
+      .populate("moderatedBy", "username email")
       .sort({ createdAt: -1 })
       .limit(Math.min(1000, Math.max(1, parseInt(limit) || 50)))
       .lean();
@@ -1820,13 +1797,13 @@ router.get('/moderation/flagged', async (req, res) => {
     const stats = await FlaggedContent.aggregate([
       {
         $group: {
-          _id: '$contentType',
+          _id: "$contentType",
           total: { $sum: 1 },
           pending: {
-            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
-          }
-        }
-      }
+            $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] },
+          },
+        },
+      },
     ]);
 
     res.json({
@@ -1836,141 +1813,148 @@ router.get('/moderation/flagged', async (req, res) => {
         stats: stats.reduce((acc, item) => {
           acc[item._id] = item;
           return acc;
-        }, {})
-      }
-    });
-
-  } catch (err) {
-    Logger.error('Moderation fetch error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'MODERATION_ERROR',
-        message: 'Failed to fetch flagged content',
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
-
-router.patch('/moderation/:id', auditLogger('content_moderated', 'flagged_content'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { action, reason } = req.body;
-
-    if (!['approve', 'remove', 'warn'].includes(action)) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'INVALID_ACTION',
-          message: 'Invalid moderation action',
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-
-    const flagged = await FlaggedContent.findByIdAndUpdate(
-      id,
-      {
-        status: action === 'approve' ? 'approved' : 'removed',
-        moderatedBy: req.user.id,
-        moderatedAt: new Date(),
-        moderationReason: reason
+        }, {}),
       },
-      { new: true }
-    ).populate('contentId');
-
-    if (!flagged) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Flagged content not found',
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-
-    // Take action on original content
-    if (action === 'remove') {
-      const Model = flagged.contentType === 'question' ? Question : Result;
-      await Model.findByIdAndUpdate(flagged.contentId, {
-        isDeleted: true,
-        deletedReason: reason
-      });
-    }
-
-    res.json({
-      success: true,
-      data: { flagged }
     });
-
   } catch (err) {
-    Logger.error('Moderation action error', { error: err.message });
+    Logger.error("Moderation fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'MODERATION_ACTION_ERROR',
-        message: 'Failed to moderate content',
-        timestamp: new Date().toISOString()
-      }
+        code: "MODERATION_ERROR",
+        message: "Failed to fetch flagged content",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
+
+router.patch(
+  "/moderation/:id",
+  auditLogger("content_moderated", "flagged_content"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { action, reason } = req.body;
+
+      if (!["approve", "remove", "warn"].includes(action)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_ACTION",
+            message: "Invalid moderation action",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      const flagged = await FlaggedContent.findByIdAndUpdate(
+        id,
+        {
+          status: action === "approve" ? "approved" : "removed",
+          moderatedBy: req.user.id,
+          moderatedAt: new Date(),
+          moderationReason: reason,
+        },
+        { new: true },
+      ).populate("contentId");
+
+      if (!flagged) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: "NOT_FOUND",
+            message: "Flagged content not found",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      // Take action on original content
+      if (action === "remove") {
+        const Model = flagged.contentType === "question" ? Question : Result;
+        await Model.findByIdAndUpdate(flagged.contentId, {
+          isDeleted: true,
+          deletedReason: reason,
+        });
+      }
+
+      res.json({
+        success: true,
+        data: { flagged },
+      });
+    } catch (err) {
+      Logger.error("Moderation action error", { error: err.message });
+      res.status(500).json({
+        success: false,
+        error: {
+          code: "MODERATION_ACTION_ERROR",
+          message: "Failed to moderate content",
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+  },
+);
 
 // ===== REPORTS =====
-router.post('/reports/generate', auditLogger('report_generated', 'report'), async (req, res) => {
-  try {
-    const { type, period = '30', format = 'json' } = req.body;
+router.post(
+  "/reports/generate",
+  auditLogger("report_generated", "report"),
+  async (req, res) => {
+    try {
+      const { type, period = "30", format = "json" } = req.body;
 
-    if (!['user_activity', 'system_performance', 'content_summary', 'financial'].includes(type)) {
-      return res.status(400).json({
+      if (
+        !["user_activity", "system_performance", "content_summary", "financial"].includes(type)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: "INVALID_REPORT_TYPE",
+            message: "Invalid report type",
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      const report = await reportService.generateReport({
+        type,
+        period,
+        format,
+        generatedBy: req.user.id,
+      });
+
+      res.json({
+        success: true,
+        data: { report },
+      });
+    } catch (err) {
+      Logger.error("Report generation error", { error: err.message });
+      res.status(500).json({
         success: false,
         error: {
-          code: 'INVALID_REPORT_TYPE',
-          message: 'Invalid report type',
-          timestamp: new Date().toISOString()
-        }
+          code: "REPORT_GENERATION_ERROR",
+          message: "Failed to generate report",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
+  },
+);
 
-    const report = await reportService.generateReport({
-      type,
-      period,
-      format,
-      generatedBy: req.user.id
-    });
-
-    res.json({
-      success: true,
-      data: { report }
-    });
-
-  } catch (err) {
-    Logger.error('Report generation error', { error: err.message });
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'REPORT_GENERATION_ERROR',
-        message: 'Failed to generate report',
-        timestamp: new Date().toISOString()
-      }
-    });
-  }
-});
-
-router.get('/reports', async (req, res) => {
+router.get("/reports", async (req, res) => {
   try {
     const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 20);
 
     const [reports, total] = await Promise.all([
-      BackupHistory.find({ type: 'report' })
+      BackupHistory.find({ type: "report" })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .populate('createdBy', 'username email')
+        .populate("createdBy", "username email")
         .lean(),
-      BackupHistory.countDocuments({ type: 'report' })
+      BackupHistory.countDocuments({ type: "report" }),
     ]);
 
     res.json({
@@ -1980,34 +1964,33 @@ router.get('/reports', async (req, res) => {
         pagination: {
           currentPage: page,
           totalPages: Math.ceil(total / limit),
-          total
-        }
-      }
+          total,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Reports fetch error', { error: err.message });
+    Logger.error("Reports fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'REPORTS_FETCH_ERROR',
-        message: 'Failed to fetch reports',
-        timestamp: new Date().toISOString()
-      }
+        code: "REPORTS_FETCH_ERROR",
+        message: "Failed to fetch reports",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== AUDIT LOGS =====
-router.get('/audit-logs', async (req, res) => {
+router.get("/audit-logs", async (req, res) => {
   try {
     const {
       page = 1,
       limit = 50,
-      action = '',
-      userId = '',
-      startDate = '',
-      endDate = ''
+      action = "",
+      userId = "",
+      startDate = "",
+      endDate = "",
     } = req.query;
 
     const { page: safePage, limit: safeLimit, skip } = sanitizePagination(page, limit, 20);
@@ -2023,12 +2006,12 @@ router.get('/audit-logs', async (req, res) => {
 
     const [logs, total] = await Promise.all([
       AuditLog.find(filter)
-        .populate('userId', 'username email')
+        .populate("userId", "username email")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit)
         .lean(),
-      AuditLog.countDocuments(filter)
+      AuditLog.countDocuments(filter),
     ]);
 
     res.json({
@@ -2038,26 +2021,25 @@ router.get('/audit-logs', async (req, res) => {
         pagination: {
           currentPage: safePage,
           totalPages: Math.ceil(total / safeLimit),
-          totalLogs: total
-        }
-      }
+          totalLogs: total,
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Audit logs fetch error', { error: err.message });
+    Logger.error("Audit logs fetch error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'AUDIT_LOGS_ERROR',
-        message: 'Failed to fetch audit logs',
-        timestamp: new Date().toISOString()
-      }
+        code: "AUDIT_LOGS_ERROR",
+        message: "Failed to fetch audit logs",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== BULK OPERATIONS =====
-router.post('/bulk/users', auditLogger('bulk_user_operation', 'user'), async (req, res) => {
+router.post("/bulk/users", auditLogger("bulk_user_operation", "user"), async (req, res) => {
   try {
     const { userIds, action, value } = req.body;
 
@@ -2065,61 +2047,52 @@ router.post('/bulk/users', auditLogger('bulk_user_operation', 'user'), async (re
       return res.status(400).json({
         success: false,
         error: {
-          code: 'INVALID_REQUEST',
-          message: 'User IDs array is required',
-          timestamp: new Date().toISOString()
-        }
+          code: "INVALID_REQUEST",
+          message: "User IDs array is required",
+          timestamp: new Date().toISOString(),
+        },
       });
     }
 
     let result;
     switch (action) {
-      case 'activate':
+      case "activate":
+        result = await User.updateMany({ _id: { $in: userIds } }, { isActive: true });
+        break;
+
+      case "deactivate":
+        result = await User.updateMany({ _id: { $in: userIds } }, { isActive: false });
+        break;
+
+      case "delete":
         result = await User.updateMany(
           { _id: { $in: userIds } },
-          { isActive: true }
+          { isDeleted: true, deletedAt: new Date() },
         );
         break;
 
-      case 'deactivate':
-        result = await User.updateMany(
-          { _id: { $in: userIds } },
-          { isActive: false }
-        );
-        break;
-
-      case 'delete':
-        result = await User.updateMany(
-          { _id: { $in: userIds } },
-          { isDeleted: true, deletedAt: new Date() }
-        );
-        break;
-
-      case 'changeRole':
-        if (!['user', 'admin'].includes(value)) {
+      case "changeRole":
+        if (!["user", "admin"].includes(value)) {
           return res.status(400).json({
             success: false,
             error: {
-              code: 'INVALID_ROLE',
-              message: 'Invalid role value',
-              timestamp: new Date().toISOString()
-            }
+              code: "INVALID_ROLE",
+              message: "Invalid role value",
+              timestamp: new Date().toISOString(),
+            },
           });
         }
-        result = await User.updateMany(
-          { _id: { $in: userIds } },
-          { role: value }
-        );
+        result = await User.updateMany({ _id: { $in: userIds } }, { role: value });
         break;
 
       default:
         return res.status(400).json({
           success: false,
           error: {
-            code: 'INVALID_ACTION',
-            message: 'Invalid action specified',
-            timestamp: new Date().toISOString()
-          }
+            code: "INVALID_ACTION",
+            message: "Invalid action specified",
+            timestamp: new Date().toISOString(),
+          },
         });
     }
 
@@ -2127,30 +2100,29 @@ router.post('/bulk/users', auditLogger('bulk_user_operation', 'user'), async (re
       success: true,
       data: {
         modifiedCount: result.modifiedCount,
-        message: `Successfully ${action}d ${result.modifiedCount} users`
-      }
+        message: `Successfully ${action}d ${result.modifiedCount} users`,
+      },
     });
-
   } catch (err) {
-    Logger.error('Bulk user action error', { error: err.message });
+    Logger.error("Bulk user action error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'BULK_ACTION_ERROR',
-        message: 'Failed to perform bulk action',
-        timestamp: new Date().toISOString()
-      }
+        code: "BULK_ACTION_ERROR",
+        message: "Failed to perform bulk action",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== DATA EXPORT =====
-router.get('/export/users', auditLogger('users_exported', 'export'), async (req, res) => {
+router.get("/export/users", auditLogger("users_exported", "export"), async (req, res) => {
   try {
-    const { format = 'csv' } = req.query;
+    const { format = "csv" } = req.query;
 
     const users = await User.find({ isDeleted: { $ne: true } })
-      .select('-password')
+      .select("-password")
       .lean();
 
     // Enrich with stats
@@ -2159,64 +2131,78 @@ router.get('/export/users', auditLogger('users_exported', 'export'), async (req,
         const [uploads, questions, results] = await Promise.all([
           PdfLibrary.countDocuments({ userId: user._id }),
           Question.countDocuments({ userId: user._id }),
-          Result.countDocuments({ userId: user._id })
+          Result.countDocuments({ userId: user._id }),
         ]);
 
         return {
           id: user._id,
           username: user.username,
           email: user.email,
-          fullname: user.fullname || '',
+          fullname: user.fullname || "",
           role: user.role,
           isActive: user.isActive,
           createdAt: user.createdAt,
-          lastLogin: user.lastLogin || '',
+          lastLogin: user.lastLogin || "",
           uploads,
           questions,
-          examsTaken: results
+          examsTaken: results,
         };
-      })
+      }),
     );
 
-    if (format === 'csv') {
-      const fields = ['id', 'username', 'email', 'fullname', 'role', 'isActive',
-        'createdAt', 'lastLogin', 'uploads', 'questions', 'examsTaken'];
+    if (format === "csv") {
+      const fields = [
+        "id",
+        "username",
+        "email",
+        "fullname",
+        "role",
+        "isActive",
+        "createdAt",
+        "lastLogin",
+        "uploads",
+        "questions",
+        "examsTaken",
+      ];
 
-      let csv = fields.join(',') + '\n';
-      enrichedUsers.forEach(user => {
-        csv += fields.map(field => {
-          const value = user[field];
-          return typeof value === 'string' && value.includes(',')
-            ? `"${value}"`
-            : value;
-        }).join(',') + '\n';
+      let csv = fields.join(",") + "\n";
+      enrichedUsers.forEach((user) => {
+        csv +=
+          fields
+            .map((field) => {
+              const value = user[field];
+              return typeof value === "string" && value.includes(",") ? `"${value}"` : value;
+            })
+            .join(",") + "\n";
       });
 
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=users_export_${Date.now()}.csv`);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=users_export_${Date.now()}.csv`,
+      );
       res.send(csv);
     } else {
       res.json({
         success: true,
-        data: { users: enrichedUsers }
+        data: { users: enrichedUsers },
       });
     }
-
   } catch (err) {
-    Logger.error('User export error', { error: err.message });
+    Logger.error("User export error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'EXPORT_ERROR',
-        message: 'Failed to export users',
-        timestamp: new Date().toISOString()
-      }
+        code: "EXPORT_ERROR",
+        message: "Failed to export users",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== ACTIVITY LOGS =====
-router.get('/activity-logs', async (req, res) => {
+router.get("/activity-logs", async (req, res) => {
   try {
     const { page, limit, skip } = sanitizePagination(req.query.page, req.query.limit, 50);
 
@@ -2224,39 +2210,35 @@ router.get('/activity-logs', async (req, res) => {
       PdfLibrary.find()
         .sort({ uploadedAt: -1 })
         .limit(20)
-        .populate('userId', 'username email')
+        .populate("userId", "username email")
         .lean(),
       Result.find()
         .sort({ createdAt: -1 })
         .limit(20)
-        .populate('userId', 'username email')
+        .populate("userId", "username email")
         .lean(),
-      User.find()
-        .sort({ createdAt: -1 })
-        .limit(20)
-        .select('username email createdAt')
-        .lean()
+      User.find().sort({ createdAt: -1 }).limit(20).select("username email createdAt").lean(),
     ]);
 
     const activities = [
-      ...recentUploads.map(u => ({
-        type: 'upload',
+      ...recentUploads.map((u) => ({
+        type: "upload",
         user: u.userId,
         details: `Uploaded ${u.fileName} (${u.numberOfQuestions} questions)`,
-        timestamp: u.uploadedAt
+        timestamp: u.uploadedAt,
       })),
-      ...recentExams.map(e => ({
-        type: 'exam',
+      ...recentExams.map((e) => ({
+        type: "exam",
         user: e.userId,
         details: `Completed exam: ${e.topic} (Score: ${e.percentage}%)`,
-        timestamp: e.createdAt
+        timestamp: e.createdAt,
       })),
-      ...recentSignups.map(s => ({
-        type: 'signup',
+      ...recentSignups.map((s) => ({
+        type: "signup",
         user: s,
         details: `New user registered: ${s.username}`,
-        timestamp: s.createdAt
-      }))
+        timestamp: s.createdAt,
+      })),
     ]
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(skip, skip + limit);
@@ -2267,126 +2249,184 @@ router.get('/activity-logs', async (req, res) => {
         activities,
         pagination: {
           currentPage: page,
-          totalPages: Math.ceil(activities.length / limit)
-        }
-      }
+          totalPages: Math.ceil(activities.length / limit),
+        },
+      },
     });
-
   } catch (err) {
-    Logger.error('Activity logs error', { error: err.message });
+    Logger.error("Activity logs error", { error: err.message });
     res.status(500).json({
       success: false,
       error: {
-        code: 'ACTIVITY_LOGS_ERROR',
-        message: 'Failed to fetch activity logs',
-        timestamp: new Date().toISOString()
-      }
+        code: "ACTIVITY_LOGS_ERROR",
+        message: "Failed to fetch activity logs",
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 });
 
 // ===== ADMIN: GET PRICING CONFIG =====
-router.get('/pricing-config', authenticateToken, adminAuth, async (req, res) => {
+router.get("/pricing-config", authenticateToken, adminAuth, async (req, res) => {
   try {
     const config = await PricingConfig.getConfig();
     res.json({ success: true, data: config });
   } catch (err) {
-    Logger.error('Get pricing config error', { error: err.message });
-    res.status(500).json({ success: false, error: { code: 'PRICING_CONFIG_ERROR', message: 'Failed to fetch pricing config' } });
+    Logger.error("Get pricing config error", { error: err.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: { code: "PRICING_CONFIG_ERROR", message: "Failed to fetch pricing config" },
+      });
   }
 });
 
 // ===== ADMIN: UPDATE PRICING CONFIG =====
-router.put('/pricing-config', authenticateToken, adminAuth, auditLogger('update_pricing'), async (req, res) => {
-  try {
-    const { tiers, exchangeRates } = req.body;
-    const updates = {};
+router.put(
+  "/pricing-config",
+  authenticateToken,
+  adminAuth,
+  auditLogger("update_pricing"),
+  async (req, res) => {
+    try {
+      const { tiers, exchangeRates } = req.body;
+      const updates = {};
 
-    if (tiers) {
-      // Validate tier structure
-      for (const [tierName, tierData] of Object.entries(tiers)) {
-        if (!['free', 'starter', 'pro'].includes(tierName)) {
-          return res.status(400).json({ success: false, error: { code: 'INVALID_TIER', message: `Invalid tier: ${tierName}` } });
-        }
-        // Validate pricing values are non-negative
-        if (tierData.monthlyUSD !== undefined && tierData.monthlyUSD < 0) {
-          return res.status(400).json({ success: false, error: { code: 'INVALID_PRICE', message: 'Prices cannot be negative' } });
-        }
-      }
-      updates.tiers = tiers;
-    }
-
-    if (exchangeRates) {
-      updates.exchangeRates = { ...exchangeRates, lastUpdated: new Date() };
-    }
-
-    const config = await PricingConfig.updateConfig(updates, req.user.id);
-
-    // ── CASCADE: propagate new limits to ALL users on the affected tier(s) ──
-    // This ensures that when admin changes limits in the dashboard, every user
-    // on that tier gets their user.limits updated immediately in the DB.
-    if (tiers) {
-      const cascadeResults = {};
-      for (const [tierName, tierData] of Object.entries(tiers)) {
-        if (tierData.limits && typeof tierData.limits === 'object') {
-          // Build the $set object for this tier's limits
-          const limitUpdates = {};
-          for (const [key, val] of Object.entries(tierData.limits)) {
-            limitUpdates[`limits.${key}`] = val;
+      if (tiers) {
+        // Validate tier structure
+        for (const [tierName, tierData] of Object.entries(tiers)) {
+          if (!["free", "starter", "pro"].includes(tierName)) {
+            return res
+              .status(400)
+              .json({
+                success: false,
+                error: { code: "INVALID_TIER", message: `Invalid tier: ${tierName}` },
+              });
           }
-
-          // Bulk update all users on this tier
-          const result = await User.updateMany(
-            { subscriptionTier: tierName, isDeleted: { $ne: true } },
-            { $set: limitUpdates }
-          );
-
-          cascadeResults[tierName] = result.modifiedCount;
-          if (result.modifiedCount > 0) {
-            Logger.info('Cascaded pricing limits to users', {
-              tier: tierName,
-              usersUpdated: result.modifiedCount,
-              adminId: req.user.id
-            });
+          // Validate pricing values are non-negative
+          if (tierData.monthlyUSD !== undefined && tierData.monthlyUSD < 0) {
+            return res
+              .status(400)
+              .json({
+                success: false,
+                error: { code: "INVALID_PRICE", message: "Prices cannot be negative" },
+              });
           }
         }
+        updates.tiers = tiers;
       }
 
-      Logger.info('Pricing config updated with user cascade', { adminId: req.user.id, cascade: cascadeResults });
-      res.json({
-        success: true,
-        data: config,
-        cascade: cascadeResults,
-        message: 'Pricing configuration updated and applied to all users'
-      });
-    } else {
-      Logger.info('Pricing config updated by admin', { adminId: req.user.id });
-      res.json({ success: true, data: config, message: 'Pricing configuration updated successfully' });
+      if (exchangeRates) {
+        updates.exchangeRates = { ...exchangeRates, lastUpdated: new Date() };
+      }
+
+      const config = await PricingConfig.updateConfig(updates, req.user.id);
+
+      // ── CASCADE: propagate new limits to ALL users on the affected tier(s) ──
+      // This ensures that when admin changes limits in the dashboard, every user
+      // on that tier gets their user.limits updated immediately in the DB.
+      if (tiers) {
+        const cascadeResults = {};
+        for (const [tierName, tierData] of Object.entries(tiers)) {
+          if (tierData.limits && typeof tierData.limits === "object") {
+            // Build the $set object for this tier's limits
+            const limitUpdates = {};
+            for (const [key, val] of Object.entries(tierData.limits)) {
+              limitUpdates[`limits.${key}`] = val;
+            }
+
+            // Bulk update all users on this tier
+            const result = await User.updateMany(
+              { subscriptionTier: tierName, isDeleted: { $ne: true } },
+              { $set: limitUpdates },
+            );
+
+            cascadeResults[tierName] = result.modifiedCount;
+            if (result.modifiedCount > 0) {
+              Logger.info("Cascaded pricing limits to users", {
+                tier: tierName,
+                usersUpdated: result.modifiedCount,
+                adminId: req.user.id,
+              });
+            }
+          }
+        }
+
+        Logger.info("Pricing config updated with user cascade", {
+          adminId: req.user.id,
+          cascade: cascadeResults,
+        });
+        res.json({
+          success: true,
+          data: config,
+          cascade: cascadeResults,
+          message: "Pricing configuration updated and applied to all users",
+        });
+      } else {
+        Logger.info("Pricing config updated by admin", { adminId: req.user.id });
+        res.json({
+          success: true,
+          data: config,
+          message: "Pricing configuration updated successfully",
+        });
+      }
+    } catch (err) {
+      Logger.error("Update pricing config error", { error: err.message });
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: { code: "PRICING_UPDATE_ERROR", message: "Failed to update pricing config" },
+        });
     }
-  } catch (err) {
-    Logger.error('Update pricing config error', { error: err.message });
-    res.status(500).json({ success: false, error: { code: 'PRICING_UPDATE_ERROR', message: 'Failed to update pricing config' } });
-  }
-});
+  },
+);
 
 // ===== ADMIN: UPDATE EXCHANGE RATES =====
-router.put('/exchange-rates', authenticateToken, adminAuth, auditLogger('update_exchange_rates'), async (req, res) => {
-  try {
-    const { rates } = req.body;
-    if (!rates || typeof rates !== 'object') {
-      return res.status(400).json({ success: false, error: { code: 'INVALID_RATES', message: 'Rates object is required' } });
+router.put(
+  "/exchange-rates",
+  authenticateToken,
+  adminAuth,
+  auditLogger("update_exchange_rates"),
+  async (req, res) => {
+    try {
+      const { rates } = req.body;
+      if (!rates || typeof rates !== "object") {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            error: { code: "INVALID_RATES", message: "Rates object is required" },
+          });
+      }
+
+      const config = await PricingConfig.updateConfig(
+        {
+          exchangeRates: { ...rates, lastUpdated: new Date() },
+        },
+        req.user.id,
+      );
+
+      Logger.info("Exchange rates updated", {
+        adminId: req.user.id,
+        currencies: Object.keys(rates),
+      });
+      res.json({
+        success: true,
+        data: config.exchangeRates,
+        message: "Exchange rates updated",
+      });
+    } catch (err) {
+      Logger.error("Exchange rates update error", { error: err.message });
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: { code: "RATES_UPDATE_ERROR", message: "Failed to update exchange rates" },
+        });
     }
-
-    const config = await PricingConfig.updateConfig({
-      exchangeRates: { ...rates, lastUpdated: new Date() }
-    }, req.user.id);
-
-    Logger.info('Exchange rates updated', { adminId: req.user.id, currencies: Object.keys(rates) });
-    res.json({ success: true, data: config.exchangeRates, message: 'Exchange rates updated' });
-  } catch (err) {
-    Logger.error('Exchange rates update error', { error: err.message });
-    res.status(500).json({ success: false, error: { code: 'RATES_UPDATE_ERROR', message: 'Failed to update exchange rates' } });
-  }
-});
+  },
+);
 
 module.exports = router;

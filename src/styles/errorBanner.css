@@ -99,7 +99,7 @@
 }
 
 .error-banner-button-dismiss {
-  background: transparent;
+  background: black;
   color: var(--text-light);
   padding: 0.2rem 0.4rem;
   font-size: 1.15rem;

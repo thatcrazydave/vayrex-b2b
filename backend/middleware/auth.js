@@ -207,6 +207,24 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    // B2B: Block suspended accounts at middleware level
+    if (user.accountStatus === "suspended") {
+      Logger.warn("Suspended user attempted access", {
+        userId: user._id,
+        email: user.email,
+        ip: req.ip,
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: "ACCOUNT_SUSPENDED",
+          message: "Your account has been suspended",
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     if (user.isDeleted) {
       Logger.warn("Deleted user attempted access", {
         userId: user._id,
@@ -267,8 +285,10 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // SECURITY LAYER 8: Check subscription expiry (atomic operation to prevent race conditions)
+    // SECURITY LAYER 8: Check subscription expiry — only for non-org accounts
+    // Org members derive limits from their Organisation's plan, not personal subscriptionTier
     if (
+      !user.organizationId &&
       user.isSubscriptionExpired &&
       user.isSubscriptionExpired() &&
       user.subscriptionTier !== "free"
@@ -425,17 +445,23 @@ const checkUploadLimit = async (req, res, next) => {
       });
     }
 
-    // NEW: Fetch global pricing config for dynamic limits
+    // Org members: limits pre-computed from org plan by User pre-save hook
+    // Non-org users: derive from personal subscriptionTier in PricingConfig
     const config = await PricingConfig.getConfig();
-    const tierLimits = config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
+    const tierLimits = req.user.organizationId
+      ? req.user.limits
+      : config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
 
     if (!tierLimits) {
-      Logger.error('No tier limits found for user', { tier: req.user.subscriptionTier, userId: req.user._id });
+      Logger.error("No tier limits found for user", {
+        tier: req.user.subscriptionTier,
+        userId: req.user._id,
+      });
       return res.status(500).json({
         success: false,
         error: {
-          code: 'SERVER_ERROR',
-          message: 'Unable to determine upload limits. Please contact support.',
+          code: "SERVER_ERROR",
+          message: "Unable to determine upload limits. Please contact support.",
         },
       });
     }
@@ -504,7 +530,9 @@ const checkFileSize = async (req, res, next) => {
     }
 
     const config = await PricingConfig.getConfig();
-    const tierLimits = config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
+    const tierLimits = req.user.organizationId
+      ? req.user.limits
+      : config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
     const maxSizeMB = tierLimits.maxFileSizeMB;
 
     const files = req.files.file || req.files.files;
@@ -516,7 +544,7 @@ const checkFileSize = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         error: {
-          code: 'TOO_MANY_FILES',
+          code: "TOO_MANY_FILES",
           message: `Maximum ${MAX_FILES_PER_REQUEST} files allowed per request`,
           count: fileArray.length,
           limit: MAX_FILES_PER_REQUEST,
@@ -571,7 +599,9 @@ const checkStorageLimit = async (req, res, next) => {
     }
 
     const config = await PricingConfig.getConfig();
-    const tierLimits = config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
+    const tierLimits = req.user.organizationId
+      ? req.user.limits
+      : config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
     const maxStorageMB = tierLimits.maxStorageMB;
 
     if (maxStorageMB === -1) return next();
@@ -631,7 +661,9 @@ const checkTokenLimit = (estimatedTokens = 500) => {
       }
 
       const config = await PricingConfig.getConfig();
-      const tierLimits = config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
+      const tierLimits = req.user.organizationId
+        ? req.user.limits
+        : config.tiers[req.user.subscriptionTier]?.limits || req.user.limits;
 
       // Check per-request token limit
       if (estimatedTokens > tierLimits.tokensPerRequest) {

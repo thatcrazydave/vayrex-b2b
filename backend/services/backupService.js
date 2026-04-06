@@ -1,38 +1,28 @@
-const mongoose = require('mongoose');
-const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const BackupHistory = require('../models/BackupHistory');
-const Logger = require('../logger');
-const zlib = require('zlib');
-const { promisify } = require('util');
+const mongoose = require("mongoose");
+const storageService = require("./storageService");
+const BackupHistory = require("../models/BackupHistory");
+const Logger = require("../logger");
+const zlib = require("zlib");
+const { promisify } = require("util");
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
 
 class BackupService {
   constructor() {
-    this.s3Client = new S3Client({
-      region: process.env.AWS_REGION || 'us-east-1',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-      }
-    });
-    this.bucket = process.env.S3_BUCKET_NAME || 'vayrex-backups';
+    // B2B: storage handled by storageService (Supabase)
   }
 
   /**
-   * Validate S3 connection and credentials
+   * Validate storage connection and credentials
    */
-  async validateS3Connection() {
+  async validateStorageConnection() {
     try {
-      if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !this.bucket) {
-        Logger.warn('AWS credentials not fully configured');
-        return false;
-      }
-      Logger.info('S3 connection validated');
+      storageService.getClient();
+      Logger.info("Supabase storage connection validated");
       return true;
     } catch (err) {
-      Logger.error('S3 validation failed', { error: err.message });
+      Logger.error("Storage validation failed", { error: err.message });
       return false;
     }
   }
@@ -40,21 +30,21 @@ class BackupService {
   /**
    * Create full backup of all collections
    */
-  async createFullBackup(initiatedBy = null, type = 'manual') {
+  async createFullBackup(initiatedBy = null, type = "manual") {
     const backupRecord = await BackupHistory.create({
-      type: 'full',
+      type: "full",
       operationType: type,
-      status: 'in-progress',
+      status: "in-progress",
       initiatedBy,
       collections: [],
-      createdBy: initiatedBy
+      createdBy: initiatedBy,
     });
 
     try {
-      Logger.info('Starting full backup', { backupId: backupRecord._id });
+      Logger.info("Starting full backup", { backupId: backupRecord._id });
 
       // Collection names - fixed typo from pdflibraries to pdflibrary
-      const collections = ['users', 'questions', 'results', 'pdflibrary', 'contacts'];
+      const collections = ["users", "questions", "results", "pdflibrary", "contacts"];
       const backupData = {};
       let totalRecords = 0;
 
@@ -64,8 +54,8 @@ class BackupService {
           const data = await collection.find({}).toArray();
 
           // Remove sensitive data from users
-          if (collectionName === 'users') {
-            data.forEach(user => {
+          if (collectionName === "users") {
+            data.forEach((user) => {
               delete user.password;
               delete user.refreshToken;
               delete user.__v;
@@ -83,95 +73,91 @@ class BackupService {
 
       // Create metadata
       const metadata = {
-        type: 'full',
-        version: '1.0',
+        type: "full",
+        version: "1.0",
         timestamp: new Date().toISOString(),
         totalRecords,
         collections: Object.keys(backupData),
         nodeVersion: process.version,
-        mongodbUri: process.env.MONGODB_URI ? 'configured' : 'not-configured'
+        mongodbUri: process.env.MONGODB_URI ? "configured" : "not-configured",
       };
 
       // Combine data with metadata
       const backupPayload = {
         metadata,
-        data: backupData
+        data: backupData,
       };
 
       // Compress backup
       const jsonData = JSON.stringify(backupPayload);
       const compressed = await gzip(jsonData);
 
-      // Upload to S3
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      // Upload to Supabase storage
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backupKey = `system_backups/full_backup_${timestamp}_${backupRecord._id}.json.gz`;
 
-      await this.s3Client.send(new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: backupKey,
-        Body: compressed,
-        ContentType: 'application/gzip',
-        ServerSideEncryption: 'AES256',
-        Metadata: {
-          'backup-type': 'full',
-          'backup-id': backupRecord._id.toString(),
-          'timestamp': timestamp,
-          'record-count': totalRecords.toString(),
-          'collections': collections.join(',')
-        }
-      }));
+      await storageService.upload(
+        compressed,
+        backupKey,
+        "application/gzip",
+        null,
+        initiatedBy,
+      );
 
       // Update backup record
-      const updatedBackup = await BackupHistory.findByIdAndUpdate(backupRecord._id, {
-        status: 'completed',
-        backupKey,
-        s3Url: `https://${this.bucket}.s3.amazonaws.com/${backupKey}`,
-        fileSize: compressed.length,
-        collections,
-        recordCount: totalRecords,
-        completedAt: new Date(),
-        metadata: {
+      const updatedBackup = await BackupHistory.findByIdAndUpdate(
+        backupRecord._id,
+        {
+          status: "completed",
+          backupKey,
+          s3Url: backupKey,
+          fileSize: compressed.length,
           collections,
-          totalRecords,
-          compressed: true,
-          originalSize: jsonData.length
-        }
-      }, { new: true }).populate('initiatedBy', 'username email');
+          recordCount: totalRecords,
+          completedAt: new Date(),
+          metadata: {
+            collections,
+            totalRecords,
+            compressed: true,
+            originalSize: jsonData.length,
+          },
+        },
+        { new: true },
+      ).populate("initiatedBy", "username email");
 
-      Logger.info('Full backup completed', {
+      Logger.info("Full backup completed", {
         backupId: backupRecord._id,
         recordCount: totalRecords,
         fileSize: compressed.length,
-        compressionRatio: ((1 - compressed.length / jsonData.length) * 100).toFixed(2) + '%'
+        compressionRatio: ((1 - compressed.length / jsonData.length) * 100).toFixed(2) + "%",
       });
 
       return updatedBackup;
-
     } catch (err) {
-      Logger.error('Backup failed', {
+      Logger.error("Backup failed", {
         backupId: backupRecord._id,
         error: err.message,
-        stack: err.stack
+        stack: err.stack,
       });
 
       await BackupHistory.findByIdAndUpdate(backupRecord._id, {
-        status: 'failed',
+        status: "failed",
         errorMessage: err.message,
-        failedAt: new Date()
+        failedAt: new Date(),
       });
 
       // Create alert for failed backup
       try {
-        const AlertService = require('./alertService');
+        const AlertService = require("./alertService");
         await AlertService.createAlert(
-          'error',
-          'critical',
-          'backup',
+          "error",
+          "critical",
+          "backup",
           `System backup failed: ${err.message}`,
-          { backupId: backupRecord._id.toString(), error: err.message }
+          { backupId: backupRecord._id.toString(), error: err.message },
         );
       } catch (alertErr) {
-        Logger.warn('Failed to create alert for backup failure', { error: alertErr.message });
+        Logger.warn("Failed to create alert for backup failure", { error: alertErr.message });
       }
 
       throw err;
@@ -181,35 +167,35 @@ class BackupService {
   /**
    * Create partial backup of selected collections
    */
-  async createPartialBackup(collections = [], initiatedBy = null, type = 'manual') {
+  async createPartialBackup(collections = [], initiatedBy = null, type = "manual") {
     if (!Array.isArray(collections) || collections.length === 0) {
-      throw new Error('At least one collection must be selected for partial backup');
+      throw new Error("At least one collection must be selected for partial backup");
     }
 
     const backupRecord = await BackupHistory.create({
-      type: 'partial',
+      type: "partial",
       operationType: type,
-      status: 'in-progress',
+      status: "in-progress",
       initiatedBy,
       collections,
-      createdBy: initiatedBy
+      createdBy: initiatedBy,
     });
 
     try {
-      Logger.info('Starting partial backup', {
+      Logger.info("Starting partial backup", {
         backupId: backupRecord._id,
-        collections: collections
+        collections: collections,
       });
 
       const backupData = {};
       let totalRecords = 0;
 
       // Validate collection names
-      const validCollections = ['users', 'questions', 'results', 'pdflibrary', 'contacts'];
-      const invalidCollections = collections.filter(c => !validCollections.includes(c));
+      const validCollections = ["users", "questions", "results", "pdflibrary", "contacts"];
+      const invalidCollections = collections.filter((c) => !validCollections.includes(c));
 
       if (invalidCollections.length > 0) {
-        throw new Error(`Invalid collection names: ${invalidCollections.join(', ')}`);
+        throw new Error(`Invalid collection names: ${invalidCollections.join(", ")}`);
       }
 
       for (const collectionName of collections) {
@@ -218,8 +204,8 @@ class BackupService {
           const data = await collection.find({}).toArray();
 
           // Remove sensitive data from users
-          if (collectionName === 'users') {
-            data.forEach(user => {
+          if (collectionName === "users") {
+            data.forEach((user) => {
               delete user.password;
               delete user.refreshToken;
               delete user.__v;
@@ -237,81 +223,71 @@ class BackupService {
 
       // Create metadata
       const metadata = {
-        type: 'partial',
-        version: '1.0',
+        type: "partial",
+        version: "1.0",
         timestamp: new Date().toISOString(),
         totalRecords,
         collections: collections,
-        nodeVersion: process.version
+        nodeVersion: process.version,
       };
 
       // Combine data with metadata
       const backupPayload = {
         metadata,
-        data: backupData
+        data: backupData,
       };
 
       // Compress backup
       const jsonData = JSON.stringify(backupPayload);
       const compressed = await gzip(jsonData);
 
-      // Upload to S3
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      // Upload to Supabase storage
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backupKey = `system_backups/partial_backup_${timestamp}_${backupRecord._id}.json.gz`;
 
-      await this.s3Client.send(new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: backupKey,
-        Body: compressed,
-        ContentType: 'application/gzip',
-        ServerSideEncryption: 'AES256',
-        Metadata: {
-          'backup-type': 'partial',
-          'backup-id': backupRecord._id.toString(),
-          'timestamp': timestamp,
-          'record-count': totalRecords.toString(),
-          'collections': collections.join(',')
-        }
-      }));
+      await storageService.upload(compressed, backupKey, "application/gzip", null, null);
 
       // Update backup record
-      const updatedBackup = await BackupHistory.findByIdAndUpdate(backupRecord._id, {
-        status: 'completed',
-        backupKey,
-        s3Url: `https://${this.bucket}.s3.amazonaws.com/${backupKey}`,
-        fileSize: compressed.length,
-        collections,
-        recordCount: totalRecords,
-        completedAt: new Date(),
-        metadata: {
+      const updatedBackup = await BackupHistory.findByIdAndUpdate(
+        backupRecord._id,
+        {
+          status: "completed",
+          backupKey,
+          s3Url: backupKey,
+          fileSize: compressed.length,
           collections,
-          totalRecords,
-          compressed: true,
-          originalSize: jsonData.length
-        }
-      }, { new: true }).populate('initiatedBy', 'username email');
+          recordCount: totalRecords,
+          completedAt: new Date(),
+          metadata: {
+            collections,
+            totalRecords,
+            compressed: true,
+            originalSize: jsonData.length,
+          },
+        },
+        { new: true },
+      ).populate("initiatedBy", "username email");
 
-      Logger.info('Partial backup completed', {
+      Logger.info("Partial backup completed", {
         backupId: backupRecord._id,
         recordCount: totalRecords,
         fileSize: compressed.length,
         collections,
-        compressionRatio: ((1 - compressed.length / jsonData.length) * 100).toFixed(2) + '%'
+        compressionRatio: ((1 - compressed.length / jsonData.length) * 100).toFixed(2) + "%",
       });
 
       return updatedBackup;
-
     } catch (err) {
-      Logger.error('Partial backup failed', {
+      Logger.error("Partial backup failed", {
         backupId: backupRecord._id,
         error: err.message,
-        stack: err.stack
+        stack: err.stack,
       });
 
       await BackupHistory.findByIdAndUpdate(backupRecord._id, {
-        status: 'failed',
+        status: "failed",
         errorMessage: err.message,
-        failedAt: new Date()
+        failedAt: new Date(),
       });
 
       throw err;
@@ -325,46 +301,43 @@ class BackupService {
     const backup = await BackupHistory.findById(backupId);
 
     if (!backup) {
-      throw new Error('Backup not found');
+      throw new Error("Backup not found");
     }
 
-    if (backup.status !== 'completed') {
+    if (backup.status !== "completed") {
       throw new Error(`Cannot restore backup with status: ${backup.status}`);
     }
 
     if (!backup.backupKey) {
-      throw new Error('Backup S3 key is missing');
+      throw new Error("Backup S3 key is missing");
     }
 
     // Update status to restoring
     await BackupHistory.findByIdAndUpdate(backupId, {
-      status: 'restoring',
-      restoredBy: userId
+      status: "restoring",
+      restoredBy: userId,
     });
 
     try {
-      Logger.info('Starting backup restore', {
+      Logger.info("Starting backup restore", {
         backupId,
         userId,
-        backupKey: backup.backupKey
+        backupKey: backup.backupKey,
       });
 
-      // Download from S3
-      const getObjectResponse = await this.s3Client.send(new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: backup.backupKey
-      }));
+      // Download from Supabase storage
+      const { buffer: compressedBuffer } = await storageService.download(
+        backup.backupKey,
+        null,
+      );
 
-      // Convert stream to buffer
-      const chunks = [];
-      for await (const chunk of getObjectResponse.Body) {
-        chunks.push(chunk);
-      }
+      // Decompress
+      const chunks = [compressedBuffer];
       const compressedData = Buffer.concat(chunks);
 
-      Logger.info('Backup downloaded from S3', {
+      Logger.info("Backup downloaded from S3", {
         backupId,
-        size: compressedData.length
+        size: compressedData.length,
       });
 
       // Decompress
@@ -374,18 +347,18 @@ class BackupService {
       const { metadata, data } = backupPayload;
 
       // Validate backup structure
-      if (!data || typeof data !== 'object') {
-        throw new Error('Invalid backup structure');
+      if (!data || typeof data !== "object") {
+        throw new Error("Invalid backup structure");
       }
 
       if (!metadata || !Array.isArray(metadata.collections)) {
-        throw new Error('Invalid backup metadata');
+        throw new Error("Invalid backup metadata");
       }
 
-      Logger.info('Backup decompressed and validated', {
+      Logger.info("Backup decompressed and validated", {
         backupId,
         collections: metadata.collections,
-        recordCount: metadata.totalRecords
+        recordCount: metadata.totalRecords,
       });
 
       // Restore collections
@@ -399,7 +372,7 @@ class BackupService {
 
           if (!Array.isArray(collectionData) || collectionData.length === 0) {
             Logger.info(`Skipping empty collection: ${collectionName}`);
-            restoreResults[collectionName] = { status: 'skipped', count: 0 };
+            restoreResults[collectionName] = { status: "skipped", count: 0 };
             continue;
           }
 
@@ -413,20 +386,20 @@ class BackupService {
           restoredRecords += insertedCount;
 
           restoreResults[collectionName] = {
-            status: 'restored',
-            count: insertedCount
+            status: "restored",
+            count: insertedCount,
           };
 
           Logger.info(`Restored ${collectionName}`, {
-            inserted: insertedCount
+            inserted: insertedCount,
           });
         } catch (restoreErr) {
           Logger.error(`Failed to restore ${collectionName}`, {
-            error: restoreErr.message
+            error: restoreErr.message,
           });
           restoreResults[collectionName] = {
-            status: 'failed',
-            error: restoreErr.message
+            status: "failed",
+            error: restoreErr.message,
           };
           // Continue with other collections instead of throwing
         }
@@ -436,52 +409,57 @@ class BackupService {
       const updatedBackup = await BackupHistory.findByIdAndUpdate(
         backupId,
         {
-          status: 'restored',
+          status: "restored",
           restoredBy: userId,
           restoredAt: new Date(),
           recordCount: restoredRecords,
           restoreMetadata: {
             results: restoreResults,
-            totalRestored: restoredRecords
-          }
+            totalRestored: restoredRecords,
+          },
         },
-        { new: true }
-      ).populate('initiatedBy', 'username email').populate('restoredBy', 'username email');
+        { new: true },
+      )
+        .populate("initiatedBy", "username email")
+        .populate("restoredBy", "username email");
 
-      Logger.info('Backup restore completed', {
+      Logger.info("Backup restore completed", {
         backupId,
         restoredRecords,
         restoredBy: userId,
-        results: restoreResults
+        results: restoreResults,
       });
 
       // Create alert for successful restore
       try {
-        const AlertService = require('./alertService');
+        const AlertService = require("./alertService");
         await AlertService.createAlert(
-          'info',
-          'medium',
-          'backup',
+          "info",
+          "medium",
+          "backup",
           `Backup ${backup._id} has been successfully restored. ${restoredRecords} records restored.`,
-          { backupId: backup._id.toString(), recordsRestored: restoredRecords, restoredBy: userId }
+          {
+            backupId: backup._id.toString(),
+            recordsRestored: restoredRecords,
+            restoredBy: userId,
+          },
         );
       } catch (alertErr) {
-        Logger.warn('Failed to create alert for backup restore', { error: alertErr.message });
+        Logger.warn("Failed to create alert for backup restore", { error: alertErr.message });
       }
 
       return updatedBackup;
-
     } catch (err) {
-      Logger.error('Backup restore failed', {
+      Logger.error("Backup restore failed", {
         backupId,
         error: err.message,
-        stack: err.stack
+        stack: err.stack,
       });
 
       await BackupHistory.findByIdAndUpdate(backupId, {
-        status: 'failed',
+        status: "failed",
         errorMessage: `Restore failed: ${err.message}`,
-        failedAt: new Date()
+        failedAt: new Date(),
       });
 
       throw err;
@@ -495,44 +473,40 @@ class BackupService {
     const backup = await BackupHistory.findById(backupId);
 
     if (!backup) {
-      throw new Error('Backup not found');
+      throw new Error("Backup not found");
     }
 
     try {
-      Logger.info('Starting backup deletion', {
+      Logger.info("Starting backup deletion", {
         backupId,
         userId,
-        s3Key: backup.backupKey
+        s3Key: backup.backupKey,
       });
 
-      // Delete from S3
+      // Delete from Supabase storage
       if (backup.backupKey) {
-        await this.s3Client.send(new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: backup.backupKey
-        }));
+        await storageService.remove(backup.backupKey, null);
 
-        Logger.info('Backup deleted from S3', {
+        Logger.info("Backup deleted from storage", {
           backupId,
-          key: backup.backupKey
+          key: backup.backupKey,
         });
       }
 
       // Delete from database
       await BackupHistory.findByIdAndDelete(backupId);
 
-      Logger.info('Backup deleted from database', {
+      Logger.info("Backup deleted from database", {
         backupId,
-        deletedBy: userId
+        deletedBy: userId,
       });
 
       return { success: true, backupId };
-
     } catch (err) {
-      Logger.error('Backup deletion error', {
+      Logger.error("Backup deletion error", {
         backupId,
         error: err.message,
-        stack: err.stack
+        stack: err.stack,
       });
       throw err;
     }
@@ -551,7 +525,7 @@ class BackupService {
           totalSize: 0,
           byStatus: {},
           byType: {},
-          latest: null
+          latest: null,
         };
       }
 
@@ -561,10 +535,10 @@ class BackupService {
         byStatus: {},
         byType: {},
         latest: backups[0], // Already sorted, so first one is latest
-        oldestCompleted: null
+        oldestCompleted: null,
       };
 
-      backups.forEach(backup => {
+      backups.forEach((backup) => {
         // Count by status
         stats.byStatus[backup.status] = (stats.byStatus[backup.status] || 0) + 1;
 
@@ -572,20 +546,23 @@ class BackupService {
         stats.byType[backup.type] = (stats.byType[backup.type] || 0) + 1;
 
         // Find oldest completed backup
-        if (backup.status === 'completed' && (!stats.oldestCompleted || backup.completedAt < stats.oldestCompleted.completedAt)) {
+        if (
+          backup.status === "completed" &&
+          (!stats.oldestCompleted || backup.completedAt < stats.oldestCompleted.completedAt)
+        ) {
           stats.oldestCompleted = backup;
         }
       });
 
       return stats;
     } catch (err) {
-      Logger.error('Failed to get backup stats', { error: err.message });
+      Logger.error("Failed to get backup stats", { error: err.message });
       return {
         total: 0,
         totalSize: 0,
         byStatus: {},
         byType: {},
-        latest: null
+        latest: null,
       };
     }
   }
@@ -599,14 +576,14 @@ class BackupService {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .populate('initiatedBy', 'username email')
-        .populate('createdBy', 'username email')
-        .populate('restoredBy', 'username email')
+        .populate("initiatedBy", "username email")
+        .populate("createdBy", "username email")
+        .populate("restoredBy", "username email")
         .lean();
 
       return backups || [];
     } catch (err) {
-      Logger.error('Failed to get backup history', { error: err.message });
+      Logger.error("Failed to get backup history", { error: err.message });
       return [];
     }
   }
@@ -621,12 +598,12 @@ class BackupService {
 
       const oldBackups = await BackupHistory.find({
         completedAt: { $lt: cutoffDate },
-        status: 'completed'
+        status: "completed",
       });
 
-      Logger.info('Found old backups for deletion', {
+      Logger.info("Found old backups for deletion", {
         count: oldBackups.length,
-        cutoffDate
+        cutoffDate,
       });
 
       let deletedCount = 0;
@@ -637,27 +614,26 @@ class BackupService {
           await this.deleteBackup(backup._id);
           deletedCount++;
         } catch (err) {
-          Logger.warn('Failed to delete old backup', {
+          Logger.warn("Failed to delete old backup", {
             backupId: backup._id,
-            error: err.message
+            error: err.message,
           });
           errors.push({
             backupId: backup._id.toString(),
-            error: err.message
+            error: err.message,
           });
         }
       }
 
-      Logger.info('Old backups cleanup completed', {
+      Logger.info("Old backups cleanup completed", {
         deletedCount,
         failedCount: errors.length,
-        errors: errors.length > 0 ? errors : undefined
+        errors: errors.length > 0 ? errors : undefined,
       });
 
       return { deletedCount, failedCount: errors.length };
-
     } catch (err) {
-      Logger.error('Backup cleanup error', { error: err.message });
+      Logger.error("Backup cleanup error", { error: err.message });
       throw err;
     }
   }
@@ -678,27 +654,26 @@ class BackupService {
 
       const timeUntilBackup = scheduledTime - now;
 
-      Logger.info('Next backup scheduled', {
+      Logger.info("Next backup scheduled", {
         scheduledTime: scheduledTime.toISOString(),
-        hoursUntilBackup: (timeUntilBackup / (1000 * 60 * 60)).toFixed(2)
+        hoursUntilBackup: (timeUntilBackup / (1000 * 60 * 60)).toFixed(2),
       });
 
       setTimeout(() => {
-        this.createFullBackup(null, 'scheduled')
+        this.createFullBackup(null, "scheduled")
           .then((backup) => {
-            Logger.info('Scheduled backup completed', { backupId: backup._id });
+            Logger.info("Scheduled backup completed", { backupId: backup._id });
             // Schedule next backup
             this.scheduleBackups();
           })
           .catch((err) => {
-            Logger.error('Scheduled backup error', { error: err.message });
+            Logger.error("Scheduled backup error", { error: err.message });
             // Retry scheduling in 1 hour
             setTimeout(() => this.scheduleBackups(), 60 * 60 * 1000);
           });
       }, timeUntilBackup);
-
     } catch (err) {
-      Logger.error('Backup scheduling error', { error: err.message });
+      Logger.error("Backup scheduling error", { error: err.message });
     }
   }
 }
@@ -710,11 +685,15 @@ const backupService = new BackupService();
 backupService.scheduleBackups();
 
 // Setup weekly cleanup of old backups
-setInterval(() => {
-  backupService.deleteOldBackups(30)
-    .catch(err => Logger.error('Backup cleanup failed', { error: err.message }));
-}, 7 * 24 * 60 * 60 * 1000);
+setInterval(
+  () => {
+    backupService
+      .deleteOldBackups(30)
+      .catch((err) => Logger.error("Backup cleanup failed", { error: err.message }));
+  },
+  7 * 24 * 60 * 60 * 1000,
+);
 
-Logger.info('Backup service initialized');
+Logger.info("Backup service initialized");
 
 module.exports = backupService;
