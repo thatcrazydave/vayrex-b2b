@@ -61,6 +61,7 @@ const {
   sanitizeText,
 } = require("./parsers");
 
+const publicRoutes = require("./routes/public");
 const adminRoutes = require("./routes/admin");
 const authRoutes = require("./routes/auth");
 const onboardingRoutes = require("./routes/onboarding");
@@ -435,7 +436,7 @@ function ensureObjectId(userId) {
 // ===== CORS =====
 const ALLOWED_ORIGINS = (
   process.env.CORS_ORIGINS ||
-  "http://localhost:5173,http://localhost:5174,https://schools-vayrex.netlify.app"
+  "http://localhost:5173,http://localhost:5174,https://vayrex.netlify.app"
 )
   .split(",")
   .map((s) => s.trim());
@@ -456,6 +457,11 @@ app.use(
 
       // Check whitelisted origins - return the specific origin
       if (ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, origin);
+      }
+
+      // Allow all madebyovo.me subdomains and root domain
+      if (origin === "https://madebyovo.me" || origin.endsWith(".madebyovo.me")) {
         return callback(null, origin);
       }
 
@@ -1065,6 +1071,9 @@ for (const p of teacherOnlyPaths) {
     next();
   });
 }
+
+// Public tenant-resolution endpoint — no auth required, mounted first
+app.use("/api/public", publicRoutes);
 
 app.use("/api/auth", checkDatabaseHealth);
 app.use("/api/auth", authRoutes);

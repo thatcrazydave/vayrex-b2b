@@ -24,9 +24,29 @@ function GradeBook() {
     { name: 'MidTerm', maxScore: 100, isExam: false },
     { name: 'Exam', maxScore: 100, isExam: true },
   ]);
+  // Derive the components to display in the table (current + legacy from data)
+  const displayComponents = React.useMemo(() => {
+    const comps = [...orgComponents];
+    const existingNames = new Set(comps.map(c => c.name));
+    
+    // Scan loaded grades for any component types not in current settings
+    grades.forEach(g => {
+      (g.components || []).forEach(c => {
+        if (!existingNames.has(c.type)) {
+          existingNames.add(c.type);
+          comps.push({
+            name: c.type,
+            maxScore: c.maxScore || 100,
+            isExam: !!c.isExam,
+            isLegacy: true
+          });
+        }
+      });
+    });
+    return comps;
+  }, [orgComponents, grades]);
 
-  // No hardcoded componentTypes — derived from orgComponents
-  const componentNames = orgComponents.map(c => c.name);
+  const componentNames = displayComponents.map(c => c.name);
 
   useEffect(() => {
     if (!orgId) return;
@@ -95,6 +115,7 @@ function GradeBook() {
   };
 
   const updateScore = (studentId, type, value) => {
+
     setEditScores(prev => ({
       ...prev,
       [studentId]: { ...(prev[studentId] || {}), [type]: value === '' ? '' : Number(value) }
@@ -226,9 +247,9 @@ function GradeBook() {
                 <thead>
                   <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
                     <th style={thStyle}>Student</th>
-                    {orgComponents.map(c => (
+                    {displayComponents.map(c => (
                       <th key={c.name} style={{ ...thStyle, textAlign: 'center', width: 80 }}>
-                        <span>{c.name}</span>
+                        <span>{c.name} {c.isLegacy && <span style={{fontSize: 9, color: '#ef4444'}}>(old)</span>}</span>
                         <span style={{ display: 'block', fontSize: 10, color: '#9ca3af', fontWeight: 400 }}>/{c.maxScore}</span>
                       </th>
                     ))}
@@ -247,7 +268,7 @@ function GradeBook() {
                     return (
                       <tr key={sid} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={{ ...tdStyle, fontWeight: 600 }}>{s.fullname || s.email}</td>
-                        {orgComponents.map(comp => (
+                        {displayComponents.map(comp => (
                           <td key={comp.name} style={{ ...tdStyle, textAlign: 'center' }}>
                             {isTeacher && (!existing || existing.status === 'draft') ? (
                               <input
@@ -257,6 +278,9 @@ function GradeBook() {
                                 value={scores[comp.name] ?? ''}
                                 onChange={e => updateScore(sid, comp.name, e.target.value)}
                                 style={{ width: 60, padding: '4px 6px', border: '1px solid #e5e7eb', borderRadius: 6, textAlign: 'center', fontSize: 13 }}
+                                disabled={comp.isLegacy}
+                                title={comp.isLegacy ? "Legacy column. Update grading settings to include this component if you want to edit it." : ""}
+                                placeholder={comp.isLegacy ? "—" : ""}
                               />
                             ) : (
                               <span>{scores[comp.name] ?? '—'}</span>

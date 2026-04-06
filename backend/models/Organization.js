@@ -92,6 +92,18 @@ const organizationSchema = new mongoose.Schema({
     default: null,
   },
 
+  // Per-org branding: colours, logo, display copy
+  branding: {
+    logoUrl:            { type: String, default: null },  // S3 URL
+    faviconUrl:         { type: String, default: null },
+    primaryColor:       { type: String, default: "#2563eb" },
+    accentColor:        { type: String, default: "#10b981" },
+    displayName:        { type: String, default: null },  // overrides org.name in UI if set
+    tagline:            { type: String, default: null },
+    loginHeroText:      { type: String, default: null },
+    hideVayrexBranding: { type: Boolean, default: false }, // enterprise flag
+  },
+
   // Feature flags toggled by Vayrex staff per org
   featureFlags: {
     sharedLibrary: { type: Boolean, default: false },

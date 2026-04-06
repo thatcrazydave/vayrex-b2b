@@ -2,16 +2,52 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { FiTwitter, FiLinkedin, FiGithub } from 'react-icons/fi';
 import '../styles/footer.css';
+import { useTenant } from '../contexts/TenantContext.jsx';
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
+  const { tenant, isTenantHost } = useTenant();
 
+  const branding    = tenant?.branding ?? {};
+  const displayName = branding.displayName || tenant?.name;
+  const accentColor = branding.accentColor || 'var(--brand-accent, #10b981)';
+  const hideVayrex  = branding.hideVayrexBranding;
+
+  // ── Tenant host: minimal footer with school name + "Powered by Vayrex" ──
+  if (isTenantHost && tenant) {
+    return (
+      <footer className="footer" style={{ padding: '24px 0' }}>
+        <div className="footer-container">
+          <div className="footer-bottom">
+            <div className="footer-bottom-content" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+              <p className="footer-copyright">
+                &copy; {currentYear} {displayName}. All rights reserved.
+              </p>
+              {!hideVayrex && (
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary, #94a3b8)' }}>
+                  Powered by{' '}
+                  <a
+                    href="https://madebyovo.me"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: accentColor, fontWeight: 600, textDecoration: 'none' }}
+                  >
+                    Vayrex
+                  </a>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </footer>
+    );
+  }
+
+  // ── Platform host: full footer ───────────────────────────────────────────
   return (
     <footer className="footer">
       <div className="footer-container">
-        {/* Footer Top Section */}
         <div className="footer-top">
-          {/* Brand */}
           <div className="footer-column footer-brand">
             <h3 className="footer-heading">Vayrex</h3>
             <p className="footer-tagline">AI-powered educational management system for schools. Manage classes, grades, attendance, and more.</p>
@@ -20,8 +56,7 @@ export default function Footer() {
           <div className="footer-column">
             <h3 className="footer-heading">Product</h3>
             <ul className="footer-links">
-              <li><Link to="/for-schools">For Schools</Link></li>
-              <li><Link to="/org-signup">Register School</Link></li>
+              <li><Link to="/org-signup">Register Your School</Link></li>
               <li><Link to="/pricing">Pricing</Link></li>
               <li><Link to="/about">About</Link></li>
             </ul>
@@ -32,7 +67,6 @@ export default function Footer() {
             <ul className="footer-links">
               <li><Link to="/about">About</Link></li>
               <li><Link to="/contact">Contact</Link></li>
-              <li><Link to="/settings">Settings</Link></li>
             </ul>
           </div>
 
@@ -46,7 +80,6 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Footer Bottom Section */}
         <div className="footer-bottom">
           <div className="footer-bottom-content">
             <p className="footer-copyright">

@@ -1404,5 +1404,95 @@ router.put("/grading-settings", requireOrgAdmin, async (req, res) => {
   }
 });
 
+// ── PATCH /api/org/:orgId/branding ───────────────────────────────────────────
+// Update org branding (owner / org_admin only).
+// Accepted fields: logoUrl, faviconUrl, primaryColor, accentColor,
+//                  displayName, tagline, loginHeroText, hideVayrexBranding
+router.patch("/branding", requireOrgAdmin, async (req, res) => {
+  try {
+    const ALLOWED = [
+      "logoUrl", "faviconUrl", "primaryColor", "accentColor",
+      "displayName", "tagline", "loginHeroText", "hideVayrexBranding",
+    ];
+    const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
+
+    const update = {};
+    for (const key of ALLOWED) {
+      if (req.body[key] === undefined) continue;
+      const val = req.body[key];
+
+      if (key === "hideVayrexBranding") {
+        // Enterprise flag — only owner can change it
+        if (req.user.orgRole !== "owner") continue;
+        update[`branding.${key}`] = Boolean(val);
+        continue;
+      }
+      if (key === "primaryColor" || key === "accentColor") {
+        if (typeof val !== "string" || !COLOR_RE.test(val.trim())) {
+          return sendError(res, 400, `Invalid colour value for ${key}`, "VALIDATION_ERROR");
+        }
+        update[`branding.${key}`] = val.trim();
+        continue;
+      }
+      // String fields — null clears, string sets
+      if (val !== null && typeof val !== "string") {
+        return sendError(res, 400, `${key} must be a string or null`, "VALIDATION_ERROR");
+      }
+      update[`branding.${key}`] = val === null ? null : val.trim().slice(0, 500);
+    }
+
+    if (Object.keys(update).length === 0) {
+      return sendError(res, 400, "No valid branding fields provided", "VALIDATION_ERROR");
+    }
+
+    const org = await Organization.findByIdAndUpdate(
+      req.orgId,
+      { $set: update },
+      { new: true, select: "branding name slug subdomain" }
+    ).lean();
+
+    if (!org) return sendError(res, 404, "Organisation not found", "NOT_FOUND");
+
+    // Invalidate public org-by-host cache so next page load sees new branding
+    try {
+      const publicRouter = require("./public");
+      publicRouter.invalidateCache(org.subdomain);
+    } catch (_) { /* non-fatal */ }
+
+    // Also invalidate subdomainGuard cache
+    try {
+      const subdomainGuard = require("../middleware/subdomainGuard");
+      subdomainGuard.invalidateCache(org.subdomain);
+    } catch (_) { /* non-fatal */ }
+
+    AuditLog.create({
+      userId: req.user.id,
+      action: "branding_updated",
+      orgId: req.orgId,
+      details: { updatedFields: Object.keys(update) },
+      ip: req.ip,
+    }).catch(() => {});
+
+    Logger.info("Branding updated", { orgId: req.orgId, fields: Object.keys(update) });
+
+    return sendSuccess(res, { message: "Branding updated", branding: org.branding });
+  } catch (err) {
+    Logger.error("PATCH branding error", { error: err.message });
+    return sendError(res, 500, "Failed to update branding", "INTERNAL_ERROR");
+  }
+});
+
+// ── GET /api/org/:orgId/branding ─────────────────────────────────────────────
+router.get("/branding", async (req, res) => {
+  try {
+    const org = await Organization.findById(req.orgId).select("branding name slug").lean();
+    if (!org) return sendError(res, 404, "Organisation not found", "NOT_FOUND");
+    return sendSuccess(res, { branding: org.branding });
+  } catch (err) {
+    Logger.error("GET branding error", { error: err.message });
+    return sendError(res, 500, "Failed to fetch branding", "INTERNAL_ERROR");
+  }
+});
+
 module.exports = router;
 

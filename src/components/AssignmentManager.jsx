@@ -14,11 +14,17 @@ function AssignmentManager() {
   const [submissions, setSubmissions] = useState([]);
   const [subLoading, setSubLoading] = useState(false);
 
-  // Create form
+  // Grading modal state
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [gradeForm, setGradeForm] = useState({ score: '', feedback: '' });
+  const [grading, setGrading] = useState(false);
+
+  // Create / Edit form
   const [showForm, setShowForm] = useState(false);
   const [myAssignments, setMyAssignments] = useState([]);
   const [selectedAssignment, setSelectedAssignment] = useState(null);
-  const [form, setForm] = useState({ title: '', description: '', dueDate: '', maxScore: 100 });
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [form, setForm] = useState({ title: '', description: '', dueDate: '', maxScore: 100, questions: [] });
   const [creating, setCreating] = useState(false);
 
   const loadAssignments = useCallback(async () => {
@@ -47,28 +53,65 @@ function AssignmentManager() {
       .catch(() => {});
   }, [orgId, showForm]);
 
-  async function handleCreate(e) {
+  function handleEditAssignment(a) {
+    setEditingAssignmentId(a._id);
+    setSelectedAssignment(null); // Not strictly needed for edit
+    setForm({
+      title: a.title,
+      description: a.description || '',
+      dueDate: a.dueDate ? new Date(a.dueDate).toISOString().slice(0, 16) : '',
+      maxScore: a.maxScore,
+      questions: a.questionIds || []
+    });
+    setShowForm(true);
+  }
+
+  async function handleDeleteAssignment(id) {
+    if (!window.confirm("Are you sure you want to delete this draft assignment?")) return;
+    try {
+      const csrf = await API.get('/csrf-token');
+      await API.delete(`/org/${orgId}/assignments/${id}`, { headers: { 'X-CSRF-Token': csrf.data.csrfToken } });
+      toast.success('Assignment deleted');
+      loadAssignments();
+      if (expanded === id) setExpanded(null);
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to delete assignment');
+    }
+  }
+
+  async function handleSubmitForm(e) {
     e.preventDefault();
     if (!form.title.trim()) return toast.error('Title is required');
-    if (!selectedAssignment) return toast.error('Select a class/subject first');
+    if (!editingAssignmentId && !selectedAssignment) return toast.error('Select a class/subject first');
+    
     setCreating(true);
     try {
       const csrf = await API.get('/csrf-token');
-      await API.post(`/org/${orgId}/assignments`, {
-        classId: selectedAssignment.classId?._id || selectedAssignment.classId,
-        subjectId: selectedAssignment.subjectId?._id || selectedAssignment.subjectId,
-        termId: selectedAssignment.termId?._id || selectedAssignment.termId,
+      const payload = {
         title: form.title.trim(),
         description: form.description.trim(),
         dueDate: form.dueDate || undefined,
         maxScore: Number(form.maxScore) || 100,
-      }, { headers: { 'X-CSRF-Token': csrf.data.csrfToken } });
-      toast.success('Assignment created');
-      setForm({ title: '', description: '', dueDate: '', maxScore: 100 });
+        questions: form.questions,
+      };
+
+      if (editingAssignmentId) {
+        await API.patch(`/org/${orgId}/assignments/${editingAssignmentId}`, payload, { headers: { 'X-CSRF-Token': csrf.data.csrfToken } });
+        toast.success('Assignment updated');
+      } else {
+        payload.classId = selectedAssignment.classId?._id || selectedAssignment.classId;
+        payload.subjectId = selectedAssignment.subjectId?._id || selectedAssignment.subjectId;
+        payload.termId = selectedAssignment.termId?._id || selectedAssignment.termId;
+        await API.post(`/org/${orgId}/assignments`, payload, { headers: { 'X-CSRF-Token': csrf.data.csrfToken } });
+        toast.success('Assignment created');
+      }
+      
+      setForm({ title: '', description: '', dueDate: '', maxScore: 100, questions: [] });
       setShowForm(false);
+      setEditingAssignmentId(null);
       loadAssignments();
     } catch (err) {
-      toast.error(err.response?.data?.error?.message || 'Failed to create assignment');
+      toast.error(err.response?.data?.error?.message || 'Failed to save assignment');
     } finally {
       setCreating(false);
     }
@@ -82,6 +125,50 @@ function AssignmentManager() {
       loadAssignments();
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Failed to publish');
+    }
+  }
+
+  function openGradeModal(s) {
+    setSelectedSubmission(s);
+    setGradeForm({ score: s.teacherScore || '', feedback: s.feedback || '' });
+  }
+
+  function closeGradeModal() {
+    setSelectedSubmission(null);
+  }
+
+  async function handleGradeSubmission(e) {
+    e.preventDefault();
+    setGrading(true);
+    try {
+      const csrf = await API.get('/csrf-token');
+      await API.patch(
+        `/org/${orgId}/assignments/${expanded}/submissions/${selectedSubmission._id}/grade`,
+        {
+          teacherScore: Number(gradeForm.score),
+          feedback: gradeForm.feedback,
+        },
+        { headers: { 'X-CSRF-Token': csrf.data.csrfToken } }
+      );
+      toast.success('Submission graded successfully');
+      setSubmissions((prev) =>
+        prev.map((s) =>
+          s._id === selectedSubmission._id
+            ? {
+                ...s,
+                teacherScore: Number(gradeForm.score),
+                feedback: gradeForm.feedback,
+                status: 'graded',
+                totalScore: (s.autoScore || 0) + Number(gradeForm.score),
+              }
+            : s
+        )
+      );
+      closeGradeModal();
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to grade submission');
+    } finally {
+      setGrading(false);
     }
   }
 
@@ -116,22 +203,28 @@ function AssignmentManager() {
           <p style={{ fontSize: '0.9rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>Create and manage assignments for your classes.</p>
         </div>
         <button
-          onClick={() => setShowForm(v => !v)}
+          onClick={() => {
+            if (showForm) {
+              setEditingAssignmentId(null);
+              setForm({ title: '', description: '', dueDate: '', maxScore: 100, questions: [] });
+            }
+            setShowForm(!showForm);
+          }}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px', background: showForm ? '#f1f5f9' : '#0f172a', color: showForm ? '#334155' : '#fff', border: showForm ? '1px solid #e2e8f0' : 'none', borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
         >
           {showForm ? <><FiX size={14} /> Cancel</> : <><FiPlus size={14} /> New Assignment</>}
         </button>
       </div>
 
-      {/* Create Form */}
+      {/* Create / Edit Form */}
       {showForm && (
-        <form onSubmit={handleCreate} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 24, marginBottom: 24, position: 'relative', overflow: 'hidden' }}>
+        <form onSubmit={handleSubmitForm} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 24, marginBottom: 24, position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #1e293b, #334155)' }} />
           <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <FiBook size={16} /> Create Assignment
+            <FiBook size={16} /> {editingAssignmentId ? 'Edit Assignment' : 'Create Assignment'}
           </h3>
 
-          {myAssignments.length > 0 && (
+          {!editingAssignmentId && myAssignments.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <label style={labelStyle}>Class / Subject</label>
               <select
@@ -181,12 +274,150 @@ function AssignmentManager() {
             </div>
           </div>
 
+          {/* Questions Builder */}
+          <div style={{ marginBottom: 20, padding: '16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Questions (Optional)</h4>
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, questions: [...f.questions, { questionType: 'multiple-choice', questionText: '', options: ['Option 1', 'Option 2'], correctAnswer: 0, explanation: '' }] }))}
+                style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', background: '#e0f2fe', color: '#0369a1', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer' }}
+              >
+                <FiPlus size={12} /> Add Question
+              </button>
+            </div>
+            
+            {form.questions.map((q, i) => (
+              <div key={i} style={{ padding: 12, border: '1px dashed #cbd5e1', borderRadius: 8, marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 10, marginBottom: 8, alignItems: 'center' }}>
+                  <select
+                    value={q.questionType}
+                    onChange={e => {
+                      const newType = e.target.value;
+                      const qs = [...form.questions];
+                      qs[i] = { ...qs[i], questionType: newType };
+                      if (newType === 'true-false') { qs[i].options = ['True', 'False']; qs[i].correctAnswer = 0; }
+                      else if (newType === 'multiple-choice' && (!qs[i].options || qs[i].options.length < 2)) { qs[i].options = ['Option 1', 'Option 2']; qs[i].correctAnswer = 0; }
+                      setForm({ ...form, questions: qs });
+                    }}
+                    style={{ ...inputStyle, width: '150px', padding: '6px' }}
+                  >
+                    <option value="multiple-choice">Multiple Choice</option>
+                    <option value="true-false">True/False</option>
+                    <option value="fill-in-blank">Fill in Blank</option>
+                    <option value="essay">Essay / Theory</option>
+                  </select>
+                  
+                  <input
+                    placeholder="Question Text"
+                    value={q.questionText || ''}
+                    onChange={e => {
+                      const qs = [...form.questions];
+                      qs[i].questionText = e.target.value;
+                      setForm({ ...form, questions: qs });
+                    }}
+                    style={{ ...inputStyle, flex: 1, padding: '6px' }}
+                  />
+                  
+                  <button type="button" onClick={() => {
+                    const qs = form.questions.filter((_, idx) => idx !== i);
+                    setForm({ ...form, questions: qs });
+                  }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer' }} title="Remove Question">
+                    <FiX size={16} />
+                  </button>
+                </div>
+                
+                {q.questionType === 'multiple-choice' && (
+                  <div style={{ marginLeft: 160 }}>
+                    {q.options?.map((opt, optIdx) => (
+                      <div key={optIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <input
+                          type="radio"
+                          name={`q-${i}-correct-${optIdx}`}
+                          checked={q.correctAnswer === optIdx}
+                          onChange={() => {
+                            const qs = [...form.questions];
+                            qs[i].correctAnswer = optIdx;
+                            setForm({ ...form, questions: qs });
+                          }}
+                        />
+                        <input
+                          value={opt}
+                          onChange={e => {
+                            const qs = [...form.questions];
+                            qs[i].options[optIdx] = e.target.value;
+                            setForm({ ...form, questions: qs });
+                          }}
+                          style={{ ...inputStyle, padding: '4px 8px', fontSize: 13, flex: 1 }}
+                        />
+                        {q.options.length > 2 && (
+                          <button type="button" onClick={() => {
+                            const qs = [...form.questions];
+                            qs[i].options = qs[i].options.filter((_, oIdx) => oIdx !== optIdx);
+                            if (qs[i].correctAnswer >= qs[i].options.length) qs[i].correctAnswer = 0;
+                            setForm({ ...form, questions: qs });
+                          }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}>
+                            <FiX size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {q.options?.length < 5 && (
+                      <button type="button" onClick={() => {
+                        const qs = [...form.questions];
+                        qs[i].options.push(`Option ${qs[i].options.length + 1}`);
+                        setForm({ ...form, questions: qs });
+                      }} style={{ fontSize: 12, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', marginTop: 4, fontWeight: 600 }}>
+                        + Add Option
+                      </button>
+                    )}
+                  </div>
+                )}
+                
+                {q.questionType === 'true-false' && (
+                  <div style={{ marginLeft: 160, display: 'flex', gap: 16 }}>
+                    {q.options?.map((opt, optIdx) => (
+                      <label key={optIdx} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`q-${i}-correct-${optIdx}`}
+                          checked={q.correctAnswer === optIdx}
+                          onChange={() => {
+                            const qs = [...form.questions];
+                            qs[i].correctAnswer = optIdx;
+                            setForm({ ...form, questions: qs });
+                          }}
+                        /> {opt}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                
+                {q.questionType === 'fill-in-blank' && (
+                  <div style={{ marginLeft: 160, marginTop: 4 }}>
+                    <input
+                      placeholder="Expected answer (e.g. Mitochondria)"
+                      value={q.blankAnswer || ''}
+                      onChange={e => {
+                        const qs = [...form.questions];
+                        qs[i].blankAnswer = e.target.value;
+                        setForm({ ...form, questions: qs });
+                      }}
+                      style={{ ...inputStyle, padding: '4px 8px', fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+            {form.questions.length === 0 && <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>No questions added. A single generic text area will be created by default.</p>}
+          </div>
+
           <button
             type="submit"
             disabled={creating}
             style={{ padding: '10px 24px', background: creating ? '#94a3b8' : '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: creating ? 'not-allowed' : 'pointer' }}
           >
-            {creating ? 'Creating…' : 'Create Assignment'}
+            {creating ? 'Saving…' : (editingAssignmentId ? 'Save Changes' : 'Create Assignment')}
           </button>
         </form>
       )}
@@ -217,12 +448,26 @@ function AssignmentManager() {
                       {a.status}
                     </span>
                     {a.status === 'draft' && (
-                      <button
-                        onClick={() => publishAssignment(a._id)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        <FiSend size={12} /> Publish
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleEditAssignment(a)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', background: '#f8fafc', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAssignment(a._id)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fca5a5', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => publishAssignment(a._id)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 12px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                        >
+                          <FiSend size={12} /> Publish
+                        </button>
+                      </>
                     )}
                     {a.status !== 'draft' && (
                       <button
@@ -251,6 +496,7 @@ function AssignmentManager() {
                             <th style={{ padding: '6px 8px', fontWeight: 600, color: '#6b7280' }}>Auto Score</th>
                             <th style={{ padding: '6px 8px', fontWeight: 600, color: '#6b7280' }}>Total</th>
                             <th style={{ padding: '6px 8px', fontWeight: 600, color: '#6b7280' }}>Status</th>
+                            <th style={{ padding: '6px 8px', fontWeight: 600, color: '#6b7280', textAlign: 'right' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -269,6 +515,23 @@ function AssignmentManager() {
                                   {s.status || 'submitted'}
                                 </span>
                               </td>
+                              <td style={{ padding: '8px', textAlign: 'right' }}>
+                                <button
+                                  onClick={() => openGradeModal(s)}
+                                  style={{
+                                    padding: '4px 10px',
+                                    background: '#0f172a',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: 6,
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {s.status === 'graded' ? 'Edit Grade' : 'Review & Grade'}
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -279,6 +542,107 @@ function AssignmentManager() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Grade Modal */}
+      {selectedSubmission && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 10000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+        }}>
+          <div style={{
+            background: '#fff', width: '100%', maxWidth: 640, borderRadius: 16,
+            maxHeight: '90vh', overflowY: 'auto', position: 'relative'
+          }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Grade Submission</h3>
+                <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                  Student: {selectedSubmission.studentId?.fullname || selectedSubmission.studentId?.username || selectedSubmission.studentId?.email}
+                </div>
+              </div>
+              <button onClick={closeGradeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280' }}>
+                <FiX size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.5rem' }}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={labelStyle}>Student's Answer</label>
+                <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  {selectedSubmission.answers && selectedSubmission.answers.length > 0 ? (
+                    selectedSubmission.answers.map((ans, idx) => {
+                      const text = ans.answer || '';
+                      // Simple check to render images if answer happens to be a URL to an image
+                      const isImage = text.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i) || text.startsWith('data:image/');
+                      return (
+                        <div key={idx} style={{ marginBottom: 12 }}>
+                          {isImage ? (
+                            <img src={text} alt="Submission" style={{ maxWidth: '100%', borderRadius: 8 }} />
+                          ) : (
+                            <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, color: '#334155', wordBreak: 'break-word' }}>
+                              {text}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No answers provided.</span>
+                  )}
+                </div>
+              </div>
+
+              <form onSubmit={handleGradeSubmission}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: '1.5rem' }}>
+                  <div>
+                    <label style={labelStyle}>Teacher Score</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      required
+                      value={gradeForm.score}
+                      onChange={e => setGradeForm(f => ({ ...f, score: e.target.value }))}
+                      style={inputStyle}
+                      placeholder="Enter score"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Auto Score (Readonly)</label>
+                    <input
+                      type="number"
+                      value={selectedSubmission.autoScore || 0}
+                      disabled
+                      style={{ ...inputStyle, background: '#f1f5f9', color: '#64748b' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={labelStyle}>Feedback (Optional)</label>
+                  <textarea
+                    rows={4}
+                    value={gradeForm.feedback}
+                    onChange={e => setGradeForm(f => ({ ...f, feedback: e.target.value }))}
+                    style={{ ...inputStyle, resize: 'vertical' }}
+                    placeholder="Provide feedback on the answer..."
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                  <button type="button" onClick={closeGradeModal} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={grading} style={{ padding: '10px 20px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, cursor: grading ? 'not-allowed' : 'pointer' }}>
+                    {grading ? 'Saving...' : 'Save Grade'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       )}
     </div>

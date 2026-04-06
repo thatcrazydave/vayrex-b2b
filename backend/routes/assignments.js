@@ -57,6 +57,7 @@ router.post("/", requireTeacher, async (req, res) => {
       dueDate,
       maxScore,
       autoGradeObjective,
+      questions,
     } = req.body;
     const user = req.user;
 
@@ -100,6 +101,18 @@ router.post("/", requireTeacher, async (req, res) => {
       status: "draft",
     });
 
+    if (questions && Array.isArray(questions) && questions.length > 0) {
+      const savedQuestions = [];
+      for (const q of questions) {
+        q.userId = user._id;
+        q.topic = title.trim();
+        const newQ = await Question.create(q);
+        savedQuestions.push(newQ._id);
+      }
+      newAssignment.questionIds = savedQuestions;
+      await newAssignment.save();
+    }
+
     Logger.info("Assignment created", {
       assignmentId: newAssignment._id,
       teacherId: user._id,
@@ -139,6 +152,7 @@ router.get("/", async (req, res) => {
       .populate("subjectId", "name code")
       .populate("classId", "name")
       .populate("createdBy", "fullname username")
+      .populate("questionIds")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -173,6 +187,7 @@ router.get("/:id", async (req, res) => {
       .populate("subjectId", "name code")
       .populate("classId", "name")
       .populate("createdBy", "name")
+      .populate("questionIds")
       .lean();
 
     if (!assignment) {
@@ -246,6 +261,24 @@ router.patch("/:id", requireTeacher, async (req, res) => {
       }
     }
 
+    if (req.body.questions && Array.isArray(req.body.questions)) {
+      const finalQuestionIds = [];
+      for (const q of req.body.questions) {
+        if (q._id) {
+          // Update existing
+          await Question.findByIdAndUpdate(q._id, q);
+          finalQuestionIds.push(q._id);
+        } else {
+          // Create new
+          q.userId = user._id;
+          q.topic = assignment.title;
+          const newQ = await Question.create(q);
+          finalQuestionIds.push(newQ._id);
+        }
+      }
+      assignment.questionIds = finalQuestionIds;
+    }
+
     await assignment.save();
 
     Logger.info("Assignment updated", { assignmentId: assignment._id, teacherId: user._id });
@@ -254,6 +287,46 @@ router.patch("/:id", requireTeacher, async (req, res) => {
   } catch (err) {
     Logger.error("PATCH /assignments/:id error", { error: err.message });
     return sendError(res, 500, "Failed to update assignment", "SERVER_ERROR");
+  }
+});
+
+// ── DELETE /api/org/:orgId/assignments/:id ────────────────────────
+// Delete a draft assignment (teacher only, must be createdBy)
+router.delete("/:id", requireTeacher, async (req, res) => {
+  try {
+    const user = req.user;
+    const assignment = await Assignment.findOne({
+      _id: req.params.id,
+      orgId: req.orgId,
+    });
+
+    if (!assignment) {
+      return sendError(res, 404, "Assignment not found", "NOT_FOUND");
+    }
+
+    // Teachers can only delete their own assignments
+    if (
+      user.orgRole === "teacher" &&
+      assignment.createdBy.toString() !== user._id.toString()
+    ) {
+      return sendError(res, 403, "You can only delete your own assignments", "FORBIDDEN");
+    }
+
+    if (assignment.status !== "draft") {
+      return sendError(res, 400, "Only draft assignments can be deleted", "NOT_DRAFT");
+    }
+
+    await Assignment.findByIdAndDelete(assignment._id);
+
+    // Also delete any existing submissions linked to it just in case, though there shouldn't be any for drafts
+    await Submission.deleteMany({ assignmentId: assignment._id, orgId: req.orgId });
+
+    Logger.info("Assignment deleted", { assignmentId: assignment._id, teacherId: user._id });
+
+    return sendSuccess(res, { message: "Assignment deleted successfully" });
+  } catch (err) {
+    Logger.error("DELETE /assignments/:id error", { error: err.message });
+    return sendError(res, 500, "Failed to delete assignment", "SERVER_ERROR");
   }
 });
 

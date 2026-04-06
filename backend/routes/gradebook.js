@@ -162,22 +162,24 @@ router.put("/:studentId/:subjectId/:termId", requireTeacher, async (req, res) =>
     }));
 
     // Upsert the grade entry
-    const grade = await GradeBook.findOneAndUpdate(
-      { studentId, subjectId, termId },
-      {
-        $set: {
-          orgId: req.orgId,
-          teacherId: user._id,
-          classId,
-          components: stampedComponents,
-        },
-        $setOnInsert: { status: "draft" },
-      },
-      { upsert: true, new: true, runValidators: true },
-    );
+    let grade = await GradeBook.findOne({ studentId, subjectId, termId });
+    if (!grade) {
+      grade = new GradeBook({
+        studentId,
+        subjectId,
+        termId,
+        orgId: req.orgId,
+        status: "draft",
+      });
+    }
+
+    grade.teacherId = user._id;
+    grade.classId = classId;
+    grade.components = stampedComponents;
 
     // Trigger pre-save to compute derived fields
     await grade.save();
+
 
     Logger.info("Grade entry upserted", {
       gradeId: grade._id,

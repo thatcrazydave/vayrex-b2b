@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import API from '../services/api';
 import {
   FiUsers, FiBarChart2, FiCalendar, FiBook, FiCheckSquare,
-  FiAlertCircle, FiArrowRight, FiGrid, FiCheck, FiX, FiSliders
+  FiAlertCircle, FiArrowRight, FiGrid, FiCheck, FiX, FiSliders, FiDroplet
 } from 'react-icons/fi';
 import { showToast } from '../utils/toast';
 
@@ -183,12 +183,20 @@ function OrgAdminDashboard() {
           <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Class Overview</h2>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             {['owner', 'org_admin'].includes(user?.orgRole) && (
-              <Link
-                to="/org-admin/grading-settings"
-                style={{ fontSize: '0.8rem', color: '#6b7280', display: 'inline-flex', alignItems: 'center', gap: '4px', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', textDecoration: 'none' }}
-              >
-                <FiSliders size={11} /> Grading Settings
-              </Link>
+              <>
+                <Link
+                  to="/org-admin/branding"
+                  style={{ fontSize: '0.8rem', color: '#6b7280', display: 'inline-flex', alignItems: 'center', gap: '4px', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', textDecoration: 'none' }}
+                >
+                  <FiDroplet size={11} /> School Branding
+                </Link>
+                <Link
+                  to="/org-admin/grading-settings"
+                  style={{ fontSize: '0.8rem', color: '#6b7280', display: 'inline-flex', alignItems: 'center', gap: '4px', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', textDecoration: 'none' }}
+                >
+                  <FiSliders size={11} /> Grading Settings
+                </Link>
+              </>
             )}
             <Link to="/org-admin/classes" style={{ fontSize: '0.85rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
               View all <FiArrowRight size={12} />

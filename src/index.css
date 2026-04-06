@@ -15,6 +15,7 @@
   --secondary-color: #333333;
   --accent-color: #555555;
   --text-primary: #0a0a0a;
+  --text-primary-light: #ffffff;
   --text-secondary: #6b7280;
   --text-light: #9ca3af;
   --text-muted: #b0b0b0;
@@ -85,7 +86,7 @@ html {
 body {
   font-family: var(--font-sans);
   line-height: 1.6;
-  color: var(--text-primary);
+  color: var(--text-primary-);
   background: var(--background);
   min-height: 100vh;
   overflow-x: hidden;
@@ -192,7 +193,7 @@ button.secondary:hover {
 /* ── Outline Button ── */
 .btn-outline {
   background: transparent;
-  color: black;
+  color: var(--text-primary-light);
   border: 2px solid black;
 }
 

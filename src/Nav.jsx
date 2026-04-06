@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { FiLogOut, FiGrid, FiUsers, FiUser, FiBook, FiCalendar, FiChevronDown, FiZap } from 'react-icons/fi';
 import { useAuth } from './contexts/AuthContext.jsx';
+import { useTenant } from './contexts/TenantContext.jsx';
 
 // Role → nav links (per master plan Section 12 routes)
 const ROLE_NAV = {
@@ -43,6 +44,7 @@ const QUICK_ACTIONS = {
     { to: '/org-admin/gradebook', label: 'Grade Book' },
     { to: '/org-admin/report-cards', label: 'Report Cards' },
     { to: '/org-admin/announcements', label: 'Announcements' },
+    { to: '/org-admin/branding', label: 'School Branding' },
   ],
   org_admin: [
     { to: '/org-admin/members', label: 'Manage Members' },
@@ -51,6 +53,7 @@ const QUICK_ACTIONS = {
     { to: '/org-admin/gradebook', label: 'Grade Book' },
     { to: '/org-admin/report-cards', label: 'Report Cards' },
     { to: '/org-admin/announcements', label: 'Announcements' },
+    { to: '/org-admin/branding', label: 'School Branding' },
   ],
   teacher: [
     { to: '/teacher/gradebook', label: 'Grade Book' },
@@ -66,7 +69,13 @@ function Nav() {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const { user, logout, isAuthenticated } = useAuth();
+  const { tenant, isTenantHost } = useTenant();
   const navigate = useNavigate();
+
+  const branding     = tenant?.branding ?? {};
+  const displayName  = branding.displayName || tenant?.name;
+  const logoUrl      = branding.logoUrl;
+  const primaryColor = branding.primaryColor || 'var(--brand-primary, #2563eb)';
 
   // Close dropdown if clicking outside (simple approach: close on scroll)
   useEffect(() => {
@@ -98,17 +107,75 @@ function Nav() {
     setActionsOpen(false);
   };
 
-  const roleLinks = (isAuthenticated && user?.orgRole) ? (ROLE_NAV[user.orgRole] || []) : [];
+  const roleLinks  = (isAuthenticated && user?.orgRole) ? (ROLE_NAV[user.orgRole]    || []) : [];
   const quickLinks = (isAuthenticated && user?.orgRole) ? (QUICK_ACTIONS[user.orgRole] || []) : [];
+
+  // ── Logo / wordmark ─────────────────────────────────────────────────────────
+  const LogoMark = () => {
+    if (isTenantHost && tenant) {
+      if (logoUrl) {
+        return (
+          <Link to="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src={logoUrl} alt={displayName} style={{ height: 32, maxWidth: 120, objectFit: 'contain' }} />
+          </Link>
+        );
+      }
+      return (
+        <Link to="/" className="nav-logo">
+          <span className="nav-logo-mark" style={{ background: primaryColor }}>{displayName?.charAt(0).toUpperCase()}</span>
+          {displayName}
+        </Link>
+      );
+    }
+    // Platform host — default Vayrex mark
+    return (
+      <Link to="/" className="nav-logo">
+        <span className="nav-logo-mark">V</span>
+        Vayrex
+      </Link>
+    );
+  };
+
+  // ── Unauthenticated links depend on host ────────────────────────────────────
+  const PublicDesktopLinks = () => {
+    if (isTenantHost) {
+      // Tenant host: only show Login; no pricing / about / org-signup
+      return (
+        <>
+          <li><Link to="/Login">Sign in</Link></li>
+        </>
+      );
+    }
+    // Platform host
+    return (
+      <>
+        <li><Link to="/about">About</Link></li>
+        <li><Link to="/pricing">Pricing</Link></li>
+        <li><Link to="/Login">Login</Link></li>
+        <li><Link to="/org-signup" className="nav-cta">Get Started</Link></li>
+      </>
+    );
+  };
+
+  const PublicMobileLinks = () => {
+    if (isTenantHost) {
+      return <Link to="/Login" onClick={closeMenu}>Sign in</Link>;
+    }
+    return (
+      <>
+        <Link to="/about" onClick={closeMenu}>About</Link>
+        <Link to="/pricing" onClick={closeMenu}>Pricing</Link>
+        <Link to="/Login" onClick={closeMenu}>Login</Link>
+        <Link to="/org-signup" onClick={closeMenu} className="mobile-cta">Get Started</Link>
+      </>
+    );
+  };
 
   return (
     <>
       <nav className={`nav ${scrolled ? 'scrolled' : ''}`}>
         <div className="nav-container">
-          <Link to="/" className="nav-logo">
-            <span className="nav-logo-mark">V</span>
-            Vayrex
-          </Link>
+          <LogoMark />
 
           {/* Desktop Links */}
           <ul className="nav-links">
@@ -119,8 +186,8 @@ function Nav() {
                 ))}
                 {quickLinks.length > 0 && (
                   <li style={{ position: 'relative' }}>
-                    <button 
-                      className="nav-cta-action" 
+                    <button
+                      className="nav-cta-action"
                       onClick={() => setActionsOpen(!actionsOpen)}
                     >
                       <FiZap size={14} fill="currentColor" /> Actions <FiChevronDown size={14} style={{ transform: actionsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
@@ -142,9 +209,9 @@ function Nav() {
                         zIndex: 100
                       }}>
                         {quickLinks.map(({ to, label }) => (
-                          <Link 
-                            key={to} 
-                            to={to} 
+                          <Link
+                            key={to}
+                            to={to}
                             onClick={closeMenu}
                             style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)', transition: 'background 0.2s', display: 'block' }}
                             onMouseEnter={e => e.currentTarget.style.background = 'var(--background-light)'}
@@ -164,12 +231,7 @@ function Nav() {
                 </li>
               </>
             ) : (
-              <>
-                <li><Link to="/about">About</Link></li>
-                <li><Link to="/pricing">Pricing</Link></li>
-                <li><Link to="/Login">Login</Link></li>
-                <li><Link to="/org-signup" className="nav-cta">Get Started</Link></li>
-              </>
+              <PublicDesktopLinks />
             )}
           </ul>
 
@@ -206,12 +268,7 @@ function Nav() {
             </button>
           </>
         ) : (
-          <>
-            <Link to="/about" onClick={closeMenu}>About</Link>
-            <Link to="/pricing" onClick={closeMenu}>Pricing</Link>
-            <Link to="/Login" onClick={closeMenu}>Login</Link>
-            <Link to="/org-signup" onClick={closeMenu} className="mobile-cta">Get Started</Link>
-          </>
+          <PublicMobileLinks />
         )}
       </div>
     </>

@@ -41,6 +41,9 @@ function setCachedOrg(subdomain, org) {
  * extractSubdomain — pulls the first label from the Host header.
  * e.g. "lagosgrammar.madebyovo.me" → "lagosgrammar"
  * Returns null for bare domains (madebyovo.me, localhost, IP addresses).
+ *
+ * Exported so other modules (e.g. public.js route) can reuse it without
+ * importing the full middleware.
  */
 function extractSubdomain(host) {
   if (!host) return null;
@@ -161,5 +164,7 @@ const subdomainGuard = async (req, res, next) => {
 subdomainGuard.invalidateCache = function (subdomain) {
   subdomainCache.delete(subdomain.toLowerCase());
 };
+
+subdomainGuard.extractSubdomain = extractSubdomain;
 
 module.exports = subdomainGuard;

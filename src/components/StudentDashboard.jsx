@@ -38,7 +38,11 @@ function StudentDashboard() {
           const all = assignRes.value.data?.assignments || [];
           const now = new Date();
           const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-          setDueSoon(all.filter(a => a.dueDate && new Date(a.dueDate) <= weekFromNow && new Date(a.dueDate) >= now));
+          setDueSoon(all.filter(a => {
+            if (!a.dueDate) return true;
+            const d = new Date(a.dueDate);
+            return d <= weekFromNow && d >= now;
+          }));
         }
 
         if (attRes.status === 'fulfilled') {

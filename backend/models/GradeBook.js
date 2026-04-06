@@ -173,7 +173,9 @@ module.exports.bustOrgSettingsCache = bustOrgSettingsCache;
  * so that if the org changes weight/boundaries, grades recompute correctly.
  */
 gradeBookSchema.pre("save", async function (next) {
-  if (!this.isModified("components") && !this.isNew) return next();
+  // Always recompute derived fields on save to ensure synchronization
+  // since calculateDerivedFields relies on org settings which might change.
+
 
   // Load org settings (CA weight, boundaries, scoreComponents)
   let caWeight = 40;
@@ -189,40 +191,26 @@ gradeBookSchema.pre("save", async function (next) {
   }
 
   let caTotal = 0;
-  let examScore = 0;
+  let examTotal = 0;
 
+  const compMap = {};
   if (scoreComponents && scoreComponents.length > 0) {
-    // Dynamic mode: use isExam flag from org-defined components
-    const compMap = {};
     scoreComponents.forEach((sc) => { compMap[sc.name] = sc; });
-
-    const caComponents = this.components.filter((c) => !compMap[c.type]?.isExam);
-    const examComponents = this.components.filter((c) => compMap[c.type]?.isExam);
-
-    if (caComponents.length > 0) {
-      caTotal = caComponents.reduce((sum, c) => sum + (c.score / (c.maxScore || 100)) * 100, 0) / caComponents.length;
-    }
-    if (examComponents.length > 0) {
-      examScore = examComponents.reduce((sum, c) => sum + (c.score / (c.maxScore || 100)) * 100, 0) / examComponents.length;
-    }
-  } else {
-    // Legacy mode: CA1/CA2/MidTerm = CA, Exam = Exam
-    const caComponents = this.components.filter((c) => !["Exam"].includes(c.type));
-    const examComponent = this.components.find((c) => c.type === "Exam");
-
-    if (caComponents.length > 0) {
-      caTotal = caComponents.reduce((sum, c) => sum + (c.score / (c.maxScore || 100)) * 100, 0) / caComponents.length;
-    }
-    if (examComponent) {
-      examScore = (examComponent.score / (examComponent.maxScore || 100)) * 100;
-    }
   }
 
-  const examWeight = 100 - caWeight;
+  this.components.forEach((c) => {
+    const isExam = scoreComponents ? !!compMap[c.type]?.isExam : c.type === "Exam";
+    if (isExam) {
+      examTotal += c.score || 0;
+    } else {
+      caTotal += c.score || 0;
+    }
+  });
 
-  this.totalCA = Math.round(caTotal * (caWeight / 100) * 100) / 100;
-  this.totalExam = Math.round(examScore * (examWeight / 100) * 100) / 100;
+  this.totalCA = Math.round(caTotal * 100) / 100;
+  this.totalExam = Math.round(examTotal * 100) / 100;
   this.finalScore = Math.round((this.totalCA + this.totalExam) * 100) / 100;
+
 
   // Determine letter grade from org-configured boundaries
   const boundary = boundaries.find(

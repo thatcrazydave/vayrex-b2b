@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth, getDashboardRoute } from "../contexts/AuthContext.jsx";
+import { useTenant } from "../contexts/TenantContext.jsx";
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 import { showToast } from "../utils/toast.js";
 import api from '../services/api.js';
@@ -27,8 +28,15 @@ const Login = () => {
     user,
     isAdmin
   } = useAuth();
+  const { isTenantHost } = useTenant();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const getHostBase = () => {
+    const host = window.location.host;
+    if (host.startsWith('www.')) return host.substring(4);
+    return host;
+  };
 
   // Get the intended destination from state (if redirected from protected route)
   const from = location.state?.from?.pathname;
@@ -38,10 +46,15 @@ const Login = () => {
     if (isAuthenticated && isInitialized && user) {
       const redirectTo = from || getDashboardRoute(user);
       if (redirectTo && redirectTo !== '/Login') {
-        navigate(redirectTo, { replace: true });
+        const subdomain = user?.tenantSubdomain;
+        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim()) {
+          window.location.href = `${window.location.protocol}//${subdomain.trim()}.${getHostBase()}${redirectTo}`;
+        } else {
+          navigate(redirectTo, { replace: true });
+        }
       }
     }
-  }, [isAuthenticated, isInitialized, user, navigate, from]);
+  }, [isAuthenticated, isInitialized, user, navigate, from, isTenantHost]);
 
   useEffect(() => {
     if (error) {
@@ -111,7 +124,12 @@ const Login = () => {
 
       // Navigate after a short delay for toast visibility
       setTimeout(() => {
-        navigate(redirectTo, { replace: true });
+        const subdomain = loggedInUser?.tenantSubdomain;
+        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim()) {
+          window.location.href = `${window.location.protocol}//${subdomain.trim()}.${getHostBase()}${redirectTo}`;
+        } else {
+          navigate(redirectTo, { replace: true });
+        }
       }, 300);
     } else {
       showToast.error(result.error || "Login failed. Please try again.");
@@ -121,6 +139,11 @@ const Login = () => {
   // Block login form only when there is a real dashboard to redirect to
   const dashboardRoute = isAuthenticated && isInitialized && user ? (from || getDashboardRoute(user)) : null;
   if (dashboardRoute && dashboardRoute !== '/Login') {
+    // For platform-host org members, redirect to their tenant subdomain
+    const sd = user?.tenantSubdomain;
+    if (!isTenantHost && sd && typeof sd === 'string' && sd.trim()) {
+      window.location.href = `${window.location.protocol}//${sd.trim()}.${getHostBase()}${dashboardRoute}`;
+    }
     return (
       <div className="auth-container">
         <div className="auth-card" style={{ textAlign: 'center', padding: '2rem' }}>

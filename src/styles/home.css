@@ -194,7 +194,7 @@
 
 .btn-outline {
   background: black;
-  color: var(--text-primary);
+  color: var(--text-primary-light);
   border-color: var(--border-color);
 }
 

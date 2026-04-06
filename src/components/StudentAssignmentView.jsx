@@ -18,6 +18,7 @@ function StudentAssignmentView() {
   const [assignment, setAssignment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [answer, setAnswer] = useState('');
+  const [structuredAnswers, setStructuredAnswers] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -30,7 +31,14 @@ function StudentAssignmentView() {
         setAssignment(asgn);
         if (asgn.mySubmission) {
           setSubmitted(true);
-          setAnswer(asgn.mySubmission.answers?.[0]?.answer || '');
+          const fallbackAns = asgn.mySubmission.answers?.find(a => !a.questionId)?.answer || '';
+          setAnswer(fallbackAns);
+          
+          const structMap = {};
+          (asgn.mySubmission.answers || []).forEach(a => {
+            if (a.questionId) structMap[a.questionId.toString()] = a.answer;
+          });
+          setStructuredAnswers(structMap);
         }
       } catch (err) {
         showToast.error('Assignment not found or not available.');
@@ -45,15 +53,24 @@ function StudentAssignmentView() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!answer.trim()) return showToast.error('Please write your answer before submitting.');
     if (isPastDue) return showToast.error('This assignment is past its due date.');
+
+    const payloadAnswers = [];
+    const hasQuestions = assignment.questionIds && assignment.questionIds.length > 0;
+    if (hasQuestions) {
+      assignment.questionIds.forEach(q => {
+        payloadAnswers.push({ questionId: q._id, answer: structuredAnswers[q._id]?.toString() || '' });
+      });
+    } else {
+      payloadAnswers.push({ answer: answer.trim() });
+    }
 
     setSubmitting(true);
     try {
       const csrf = await API.get('/csrf-token');
       await API.post(
         `/org/${orgId}/assignments/${id}/submit`,
-        { answers: [{ answer: answer.trim() }] },
+        { answers: payloadAnswers },
         { headers: { 'X-CSRF-Token': csrf.data.csrfToken } }
       );
       setSubmitted(true);
@@ -163,20 +180,42 @@ function StudentAssignmentView() {
               </label>
               <span style={{ fontSize: 11, background: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>READ ONLY</span>
             </div>
-            <div style={{
-              width: '100%',
-              padding: '1rem',
-              border: '1px solid #e2e8f0',
-              borderRadius: 10,
-              fontSize: 15,
-              lineHeight: 1.7,
-              color: '#64748b',
-              background: '#f8fafc',
-              whiteSpace: 'pre-wrap',
-              minHeight: '200px'
-            }}>
-              {answer}
-            </div>
+            {assignment.questionIds && assignment.questionIds.length > 0 ? (
+              <div style={{ display: 'grid', gap: '1.5rem', marginTop: '1rem' }}>
+                {assignment.questionIds.map((q, idx) => (
+                  <div key={q._id} style={{ background: '#f8fafc', padding: '1rem', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 8 }}>{idx + 1}. {q.questionText}</div>
+                    <div style={{ color: '#475569', fontSize: 14 }}>
+                      <span style={{ fontWeight: 600 }}>Your Answer:</span> 
+                      {structuredAnswers[q._id] !== undefined ? (
+                        <span style={{ marginLeft: 6, color: '#0f172a' }}>
+                          {(q.questionType === 'multiple-choice' || q.questionType === 'true-false') 
+                            ? q.options?.[Number(structuredAnswers[q._id])] || structuredAnswers[q._id] 
+                            : structuredAnswers[q._id]}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic', marginLeft: 6 }}>Not answered</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{
+                width: '100%',
+                padding: '1rem',
+                border: '1px solid #e2e8f0',
+                borderRadius: 10,
+                fontSize: 15,
+                lineHeight: 1.7,
+                color: '#64748b',
+                background: '#f8fafc',
+                whiteSpace: 'pre-wrap',
+                minHeight: '200px'
+              }}>
+                {answer || <span style={{ color: '#cbd5e1', fontStyle: 'italic' }}>No content provided.</span>}
+              </div>
+            )}
           </div>
           
           <div style={{ textAlign: 'center', padding: '1rem' }}>
@@ -193,32 +232,65 @@ function StudentAssignmentView() {
         </div>
       ) : (
         <form onSubmit={handleSubmit}>
-          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '1rem' }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Your Answer
-            </label>
-            <textarea
-              value={answer}
-              onChange={e => setAnswer(e.target.value)}
-              placeholder="Write your response here..."
-              rows={10}
-              required
-              style={{
-                width: '100%',
-                padding: '1rem',
-                border: '1px solid #e2e8f0',
-                borderRadius: 10,
-                fontSize: 15,
-                lineHeight: 1.7,
-                resize: 'vertical',
-                boxSizing: 'border-box',
-                fontFamily: 'inherit',
-                color: '#1e293b',
-                background: '#f8fafc',
-                outline: 'none',
-              }}
-            />
-          </div>
+          {assignment.questionIds && assignment.questionIds.length > 0 ? (
+             <div style={{ display: 'grid', gap: '1.5rem', marginBottom: '1.5rem' }}>
+               {assignment.questionIds.map((q, idx) => (
+                 <div key={q._id} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                   <label style={{ display: 'block', fontSize: 14, fontWeight: 700, color: '#1e293b', marginBottom: 12 }}>
+                     {idx + 1}. {q.questionText}
+                   </label>
+                   
+                   {/* Multiple Choice / True-False */}
+                   {(q.questionType === 'multiple-choice' || q.questionType === 'true-false') && (
+                     <div style={{ display: 'grid', gap: 8 }}>
+                       {q.options?.map((opt, optIdx) => (
+                         <label key={optIdx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', background: structuredAnswers[q._id] === optIdx.toString() ? '#f0f9ff' : '#fff', borderColor: structuredAnswers[q._id] === optIdx.toString() ? '#38bdf8' : '#e2e8f0', transition: 'all 0.15s' }}>
+                           <input type="radio" name={`q-${q._id}`} value={optIdx} checked={structuredAnswers[q._id] === optIdx.toString()} onChange={() => setStructuredAnswers({ ...structuredAnswers, [q._id]: optIdx.toString() })} style={{ margin: 0 }} />
+                           <span style={{ fontSize: 14, color: '#334155' }}>{opt}</span>
+                         </label>
+                       ))}
+                     </div>
+                   )}
+
+                   {/* Fill in Blank */}
+                   {q.questionType === 'fill-in-blank' && (
+                     <input type="text" placeholder="Your answer" value={structuredAnswers[q._id] || ''} onChange={e => setStructuredAnswers({ ...structuredAnswers, [q._id]: e.target.value })} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+                   )}
+                   
+                   {/* Essay/Theory */}
+                   {(q.questionType === 'essay' || q.questionType === 'theory') && (
+                     <textarea placeholder="Write your response here..." value={structuredAnswers[q._id] || ''} onChange={e => setStructuredAnswers({ ...structuredAnswers, [q._id]: e.target.value })} rows={5} style={{ width: '100%', padding: '12px 14px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }} />
+                   )}
+                 </div>
+               ))}
+             </div>
+          ) : (
+            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16, padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', marginBottom: '1rem' }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Your Answer
+              </label>
+              <textarea
+                value={answer}
+                onChange={e => setAnswer(e.target.value)}
+                placeholder="Write your response here... (Optional for read-only assignments)"
+                rows={10}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 10,
+                  fontSize: 15,
+                  lineHeight: 1.7,
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit',
+                  color: '#1e293b',
+                  background: '#f8fafc',
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
             <Link to="/student" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0.75rem 1.25rem', border: '1px solid #e2e8f0', borderRadius: 10, color: '#475569', textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>

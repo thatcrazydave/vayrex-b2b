@@ -70,7 +70,7 @@ jobs:
     if: success()
     environment:
       name: production
-      url: https://schools-vayrex.madebyovo.me
+      url: https://madebyovo.me
     steps:
       - uses: actions/checkout@v4
 
@@ -98,11 +98,11 @@ jobs:
 
       - name: Deploy frontend to production
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.PROD_AWS_REGION }}
-          PROD_S3_BUCKET: ${{ secrets.PROD_S3_BUCKET }}
-          PROD_CLOUDFRONT_ID: ${{ secrets.PROD_CLOUDFRONT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets['PROD_AWS_ACCESS_KEY_ID'] }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets['PROD_AWS_SECRET_ACCESS_KEY'] }}
+          AWS_REGION: ${{ secrets['PROD_AWS_REGION'] }}
+          PROD_S3_BUCKET: ${{ secrets['PROD_S3_BUCKET'] }}
+          PROD_CLOUDFRONT_ID: ${{ secrets['PROD_CLOUDFRONT_ID'] }}
         run: |
           echo "  Deploying frontend to production S3"
           echo "Bucket: $PROD_S3_BUCKET"
@@ -111,10 +111,10 @@ jobs:
 
       - name: Deploy backend to production
         env:
-          PROD_SERVER_URL: ${{ secrets.PROD_SERVER_URL }}
-          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
-          MONGODB_URI: ${{ secrets.PROD_MONGODB_URI }}
-          JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+          PROD_SERVER_URL: ${{ secrets['PROD_SERVER_URL'] }}
+          PROD_DEPLOY_KEY: ${{ secrets['PROD_DEPLOY_KEY'] }}
+          MONGODB_URI: ${{ secrets['PROD_MONGODB_URI'] }}
+          JWT_SECRET: ${{ secrets['PROD_JWT_SECRET'] }}
         run: |
           echo " Deploying backend to production"
           echo "Server: $PROD_SERVER_URL"

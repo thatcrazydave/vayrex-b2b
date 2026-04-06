@@ -399,6 +399,15 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
     const accessToken = TokenService.generateAccessToken(user, "15m");
     const refreshToken = TokenService.generateRefreshToken(user);
 
+    let tenantSubdomain = null;
+    if (user.organizationId) {
+      const Organization = require("../models/Organization");
+      const org = await Organization.findById(user.organizationId).select("subdomain").lean();
+      if (org) {
+        tenantSubdomain = org.subdomain;
+      }
+    }
+
     const userResponse = {
       id: user._id,
       username: user.username,
@@ -416,6 +425,7 @@ router.post("/login", validateLogin, checkAccountLockout, async (req, res) => {
       guardianOf: user.guardianOf || [],
       limits: user.limits,
       usage: user.usage,
+      tenantSubdomain,
     };
 
     res.json({
