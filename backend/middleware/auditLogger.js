@@ -34,18 +34,28 @@ function auditLogger(action, targetType = null) {
   };
 }
 
+const SENSITIVE_FIELDS = [
+  'password', 'confirmPassword', 'currentPassword', 'newPassword',
+  'token', 'inviteToken', 'resetToken', 'verificationToken',
+  'resetCode', 'verificationCode', 'accessToken', 'refreshToken',
+];
+
 function sanitizeBody(body) {
-  const sanitized = { ...body };
-  delete sanitized.password;
-  delete sanitized.token;
-  return sanitized;
+  return deepSanitize(body);
 }
 
 function sanitizeResponse(data) {
-  if (typeof data !== 'object') return data;
-  const sanitized = { ...data };
-  delete sanitized.password;
-  delete sanitized.token;
+  return deepSanitize(data);
+}
+
+function deepSanitize(obj) {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(deepSanitize);
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (SENSITIVE_FIELDS.includes(key)) continue;
+    sanitized[key] = typeof value === 'object' && value !== null ? deepSanitize(value) : value;
+  }
   return sanitized;
 }
 
