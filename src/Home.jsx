@@ -1,29 +1,14 @@
 import React from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext.jsx';
+import { Link } from 'react-router-dom';
 import './styles/home.css';
 import {
   FiCheckCircle, FiUsers, FiTrendingUp, FiBook, FiShield, FiArrowRight,
   FiZap, FiAward, FiBarChart2, FiLayers, FiGrid, FiMail
 } from 'react-icons/fi';
 
-// Map org role → their home route (per master plan Section 12)
-const ROLE_HOME = {
-  owner: '/org-admin',
-  org_admin: '/org-admin',
-  it_admin: '/org-admin',
-  teacher: '/teacher',
-  student: '/student',
-  guardian: '/guardian-portal',
-};
-
 function Home() {
-  const { isAuthenticated, user } = useAuth();
-
-  // Org members always go straight to their role-specific dashboard
-  if (isAuthenticated && user?.orgRole) {
-    return <Navigate to={ROLE_HOME[user.orgRole] || '/org-admin'} replace />;
-  }
+  // Note: authenticated org members are redirected to their tenant subdomain
+  // in PlatformRoutes before this component ever renders.
 
   return (
     <div className="home-container">

@@ -538,6 +538,13 @@ router.post("/refresh", async (req, res) => {
       newRole: user.role,
     });
 
+    let refreshTenantSubdomain = null;
+    if (user.organizationId) {
+      const OrgModel = require("../models/Organization");
+      const refreshOrg = await OrgModel.findById(user.organizationId).select("subdomain").lean();
+      if (refreshOrg) refreshTenantSubdomain = refreshOrg.subdomain;
+    }
+
     res.json({
       success: true,
       data: {
@@ -561,6 +568,7 @@ router.post("/refresh", async (req, res) => {
           usage: user.usage,
           isAdmin: user.role === "admin" || user.role === "superadmin",
           isSuperAdmin: user.role === "superadmin",
+          tenantSubdomain: refreshTenantSubdomain,
         },
       },
     });

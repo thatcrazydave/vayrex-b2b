@@ -6,6 +6,7 @@ import "../styles/resultDetail.css";
 import { showToast } from "../utils/toast.js";
 import { handleApiError } from '../utils/errorHandler.js';
 import { FiArrowLeft, FiCheck, FiX, FiMinus } from 'react-icons/fi';
+import { sk } from '../utils/storageKeys.js';
 
 const ResultDetail = () => {
   const { resultId } = useParams();
@@ -47,10 +48,10 @@ const ResultDetail = () => {
       // Check if it's an authentication error
       if (err.response?.status === 401) {
         showToast.error('Session expired. Please login again.');
-        // Clear any stale auth data
-        sessionStorage.removeItem('authToken');
-        sessionStorage.removeItem('refreshToken');
-        sessionStorage.removeItem('user');
+        // Clear stale auth data from the scoped slots only
+        sessionStorage.removeItem(sk('authToken'));
+        sessionStorage.removeItem(sk('refreshToken'));
+        sessionStorage.removeItem(sk('user'));
         navigate('/login');
       } else if (err.response?.status === 403) {
         showToast.error('You do not have permission to view this result');

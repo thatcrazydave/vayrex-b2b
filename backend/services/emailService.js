@@ -1159,6 +1159,87 @@ class EmailService {
       throw err;
     }
   }
+
+  /**
+   * Internal alert sent to Vayrex ops when a school completes setup.
+   * Contains the DNS record and Netlify domain alias that must be manually provisioned.
+   */
+  async sendDnsProvisioningAlert({ orgId, orgName, slug, subdomain, ownerEmail, ownerName }) {
+    const adminEmail = process.env.VAYREX_ADMIN_EMAIL || process.env.SMTP_USER;
+    if (!adminEmail) return; // silently skip if not configured
+
+    const netlifyUrl = (process.env.NETLIFY_SITE_URL || "vayrex.netlify.app").replace(/^https?:\/\//, "");
+    const fullDomain = subdomain || `${slug}.madebyovo.me`;
+
+    const html = `
+<div style="font-family:sans-serif;max-width:600px;margin:0 auto;background:#f9f9f9;padding:32px;border-radius:12px;">
+  <div style="background:#1a1a2e;color:white;padding:20px 28px;border-radius:8px 8px 0 0;margin:-32px -32px 28px;">
+    <h2 style="margin:0;font-size:18px;">🏫 New School — DNS Provisioning Required</h2>
+    <p style="margin:4px 0 0;opacity:0.7;font-size:13px;">Vayrex Internal Alert</p>
+  </div>
+
+  <p style="margin:0 0 24px;font-size:15px;color:#333;">
+    <strong>${orgName}</strong> has completed setup and is ready to go live.<br/>
+    Provision their subdomain now so students and staff can access the platform.
+  </p>
+
+  <div style="background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;padding:20px 24px;margin-bottom:20px;">
+    <h3 style="margin:0 0 16px;font-size:14px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;">School Details</h3>
+    <table style="width:100%;font-size:14px;border-collapse:collapse;">
+      <tr><td style="padding:6px 0;color:#6b7280;width:140px;">Org ID</td><td style="font-family:monospace;color:#111;">${orgId}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;">School Name</td><td style="color:#111;">${orgName}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;">Slug</td><td style="font-family:monospace;color:#111;">${slug}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;">Portal URL</td><td><a href="https://${fullDomain}" style="color:#2563eb;">https://${fullDomain}</a></td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;">Owner</td><td style="color:#111;">${ownerName} &lt;${ownerEmail}&gt;</td></tr>
+    </table>
+  </div>
+
+  <div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:20px 24px;margin-bottom:20px;">
+    <h3 style="margin:0 0 14px;font-size:14px;color:#92400e;">Step 1 — Add DNS record in Namecheap</h3>
+    <p style="margin:0 0 12px;font-size:13px;color:#78350f;">Login to Namecheap → madebyovo.me → Advanced DNS → Add Host Record:</p>
+    <table style="width:100%;font-size:13px;border-collapse:collapse;background:#fff;border-radius:6px;overflow:hidden;">
+      <thead><tr style="background:#f3f4f6;">
+        <th style="padding:8px 12px;text-align:left;color:#374151;">Type</th>
+        <th style="padding:8px 12px;text-align:left;color:#374151;">Host</th>
+        <th style="padding:8px 12px;text-align:left;color:#374151;">Value</th>
+        <th style="padding:8px 12px;text-align:left;color:#374151;">TTL</th>
+      </tr></thead>
+      <tbody><tr>
+        <td style="padding:8px 12px;font-family:monospace;">CNAME</td>
+        <td style="padding:8px 12px;font-family:monospace;color:#2563eb;">${slug}</td>
+        <td style="padding:8px 12px;font-family:monospace;">${netlifyUrl}</td>
+        <td style="padding:8px 12px;">Automatic</td>
+      </tr></tbody>
+    </table>
+  </div>
+
+  <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:20px 24px;margin-bottom:20px;">
+    <h3 style="margin:0 0 14px;font-size:14px;color:#166534;">Step 2 — Add domain alias in Netlify</h3>
+    <p style="margin:0 0 10px;font-size:13px;color:#15803d;">Netlify Dashboard → vayrex site → Domain Management → Add domain alias:</p>
+    <code style="display:block;background:#fff;padding:10px 14px;border-radius:6px;font-size:14px;color:#111;border:1px solid #d1fae5;">${fullDomain}</code>
+    <p style="margin:10px 0 0;font-size:12px;color:#15803d;">Netlify will auto-provision SSL once the CNAME is live (usually within 1–5 minutes).</p>
+  </div>
+
+  <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">Vayrex · Internal provisioning alert · Do not reply</p>
+</div>`;
+
+    try {
+      await this._safeSend(
+        {
+          from: process.env.SMTP_FROM || `"Vayrex Ops" <${process.env.SMTP_USER}>`,
+          to: adminEmail,
+          subject: `[DNS] Provision ${fullDomain} — ${orgName}`,
+          html,
+          text: `New school ready: ${orgName}\nPortal: https://${fullDomain}\n\nNamecheap: Add CNAME record — Host: ${slug} → Value: ${netlifyUrl}\nNetlify: Add domain alias ${fullDomain}\n\nOwner: ${ownerName} <${ownerEmail}>`,
+        },
+        "sendDnsProvisioningAlert",
+      );
+      Logger.info("DNS provisioning alert sent", { orgId, slug, to: adminEmail });
+    } catch (err) {
+      // Non-fatal — log but don't break setup-complete
+      Logger.error("DNS provisioning alert failed", { error: err.message, orgId, slug });
+    }
+  }
 }
 
 // Export singleton instance of EmailService

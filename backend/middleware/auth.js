@@ -5,6 +5,7 @@ const TokenService = require("../services/tokenService");
 const Logger = require("../logger");
 const PricingConfig = require("../models/PricingConfig");
 const crypto = require("crypto");
+const { getCachedUser, invalidateUserCache } = require("../utils/userCacheUtils");
 
 // Request fingerprinting for additional security
 function generateRequestFingerprint(req) {
@@ -170,8 +171,8 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // SECURITY LAYER 4: Fetch user from database (fresh data)
-    const user = await User.findById(decoded.id).select("-password");
+    // SECURITY LAYER 4: Fetch user from cache (falls back to DB on miss)
+    const user = await getCachedUser(decoded.id);
 
     if (!user) {
       Logger.warn("Token for non-existent user", {
@@ -300,6 +301,7 @@ const authenticateToken = async (req, res, next) => {
           subscriptionStatus: "expired",
         },
       });
+      await invalidateUserCache(user._id);
 
       // Update local user object
       user.subscriptionTier = "free";

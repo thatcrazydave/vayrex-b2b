@@ -94,13 +94,13 @@ const organizationSchema = new mongoose.Schema({
 
   // Per-org branding: colours, logo, display copy
   branding: {
-    logoUrl:            { type: String, default: null },  // S3 URL
-    faviconUrl:         { type: String, default: null },
-    primaryColor:       { type: String, default: "#2563eb" },
-    accentColor:        { type: String, default: "#10b981" },
-    displayName:        { type: String, default: null },  // overrides org.name in UI if set
-    tagline:            { type: String, default: null },
-    loginHeroText:      { type: String, default: null },
+    logoUrl: { type: String, default: null }, // S3 URL
+    faviconUrl: { type: String, default: null },
+    primaryColor: { type: String, default: "#2563eb" },
+    accentColor: { type: String, default: "#10b981" },
+    displayName: { type: String, default: null }, // overrides org.name in UI if set
+    tagline: { type: String, default: null },
+    loginHeroText: { type: String, default: null },
     hideVayrexBranding: { type: Boolean, default: false }, // enterprise flag
   },
 
@@ -123,17 +123,17 @@ const organizationSchema = new mongoose.Schema({
     scoreComponents: {
       type: [
         {
-          name: { type: String, required: true, trim: true },   // e.g. "CA1", "Test 1"
+          name: { type: String, required: true, trim: true }, // e.g. "CA1", "Test 1"
           maxScore: { type: Number, required: true, min: 1, default: 100 },
-          isExam: { type: Boolean, default: false },             // true = Exam weight
-          order: { type: Number, default: 0 },                  // display order
+          isExam: { type: Boolean, default: false }, // true = Exam weight
+          order: { type: Number, default: 0 }, // display order
         },
       ],
       default: [
-        { name: "CA1",     maxScore: 100, isExam: false, order: 0 },
-        { name: "CA2",     maxScore: 100, isExam: false, order: 1 },
+        { name: "CA1", maxScore: 100, isExam: false, order: 0 },
+        { name: "CA2", maxScore: 100, isExam: false, order: 1 },
         { name: "MidTerm", maxScore: 100, isExam: false, order: 2 },
-        { name: "Exam",    maxScore: 100, isExam: true,  order: 3 },
+        { name: "Exam", maxScore: 100, isExam: true, order: 3 },
       ],
     },
     gradeBoundaries: {
@@ -156,11 +156,13 @@ const organizationSchema = new mongoose.Schema({
     attendanceThreshold: { type: Number, default: 75 }, // % alert below this
     allowExcelAttendance: { type: Boolean, default: true },
     examOfflineMode: { type: Boolean, default: true },
+    // Number of most-recent closed terms to keep in MongoDB; older ones are purged after archival
+    dataRetentionTerms: { type: Number, default: 3 },
   },
 
-  // 5-step onboarding wizard
+  // 6-step onboarding wizard
   setupComplete: { type: Boolean, default: false },
-  setupStep: { type: Number, default: 1, min: 1, max: 5 },
+  setupStep: { type: Number, default: 1, min: 1, max: 6 },
 
   isActive: {
     type: Boolean,
@@ -183,9 +185,18 @@ organizationSchema.statics.calcCapacity = function (declared) {
   return Math.ceil(declared * 1.1); // 10% buffer
 };
 
-// Helper: lookup by subdomain (cached in Redis by the guard middleware)
+// Helper: lookup by subdomain.
+// Handles both slug-only ("emilio") and full-domain ("emilio.madebyovo.me") formats,
+// since historical data stores the full domain while guard middleware extracts just the slug.
 organizationSchema.statics.findBySubdomain = function (subdomain) {
-  return this.findOne({ subdomain: subdomain.toLowerCase(), isActive: true }).lean();
+  const s = subdomain.toLowerCase();
+  const BASE = process.env.BASE_DOMAIN || "madebyovo.me";
+  // If only the slug was passed, also try the full domain form stored in DB
+  const fullDomain = s.includes(".") ? s : `${s}.${BASE}`;
+  return this.findOne({
+    $or: [{ subdomain: s }, { subdomain: fullDomain }, { slug: s }],
+    isActive: true,
+  }).lean();
 };
 
 module.exports = mongoose.model("Organization", organizationSchema);

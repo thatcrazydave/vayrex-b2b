@@ -314,6 +314,16 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
+// Post-save: Invalidate Redis user cache so auth middleware fetches fresh data
+userSchema.post("save", async function () {
+  try {
+    const { invalidateUserCache } = require("../utils/userCacheUtils");
+    await invalidateUserCache(this._id);
+  } catch (_) {
+    // Non-critical — cache will expire naturally
+  }
+});
+
 // Check if user has reached upload limit (daily for free, monthly for paid)
 userSchema.methods.hasReachedUploadLimit = function () {
   // Check daily limit (for free tier)
@@ -506,6 +516,8 @@ userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ subscriptionTier: 1, subscriptionStatus: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ lastLogin: -1 });
+userSchema.index({ organizationId: 1, orgRole: 1, isActive: 1 });
+userSchema.index({ organizationId: 1, classId: 1 });
 
 // ─── Static methods: ALL read LIVE from PricingConfig (admin dashboard) ───
 

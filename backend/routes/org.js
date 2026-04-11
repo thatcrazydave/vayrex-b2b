@@ -356,6 +356,9 @@ router.post("/academic-years", requireOrgAdmin, async (req, res) => {
     if (isNaN(start) || isNaN(end)) return sendError(res, 400, "Invalid date format");
     if (end <= start) return sendError(res, 400, "End date must be after start date");
 
+    // Auto-activate if this is the org's first academic year (no active year exists)
+    const hasActiveYear = await AcademicYear.exists({ orgId: req.orgId, isActive: true });
+
     const [year] = await AcademicYear.create(
       [
         {
@@ -363,7 +366,7 @@ router.post("/academic-years", requireOrgAdmin, async (req, res) => {
           name: name.trim(),
           startDate: start,
           endDate: end,
-          isActive: false,
+          isActive: !hasActiveYear,
           isArchived: false,
           createdBy: req.user.id,
           terms: [],
@@ -652,7 +655,25 @@ router.post("/classrooms", requireITAdmin, async (req, res) => {
       const activeYear = await AcademicYear.findOne({ orgId: req.orgId, isActive: true })
         .select("_id")
         .lean();
-      if (activeYear) yearId = activeYear._id;
+      if (activeYear) {
+        yearId = activeYear._id;
+      } else {
+        // Fall back to the most recently created year (e.g. just created but not activated)
+        const latestYear = await AcademicYear.findOne({ orgId: req.orgId })
+          .sort({ createdAt: -1 })
+          .select("_id")
+          .lean();
+        if (latestYear) {
+          yearId = latestYear._id;
+        } else {
+          return sendError(
+            res,
+            400,
+            "No academic year found. Please create an academic year before adding classrooms.",
+            "NO_ACADEMIC_YEAR",
+          );
+        }
+      }
     }
 
     const classroom = await Classroom.create({

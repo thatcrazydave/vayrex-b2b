@@ -26,15 +26,16 @@ const Signup = () => {
   // Persist the token in state so URL changes after load don't lose it
   const [savedInviteToken, setSavedInviteToken] = useState(() => searchParams.get('inviteToken'));
 
-  const { signup, loading, error, clearError, isAuthenticated, isInitialized } = useAuth();
+  const { signup, loading, error, clearError, isAuthenticated, isInitialized, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated as a confirmed org member (has tenantSubdomain).
+  // Newly signed-up users won't have tenantSubdomain yet, so this is a no-op for them.
   useEffect(() => {
-    if (isAuthenticated && isInitialized) {
-      navigate(getDashboardRoute(null));
+    if (isAuthenticated && isInitialized && user?.tenantSubdomain) {
+      window.location.replace(`https://${user.tenantSubdomain}`);
     }
-  }, [isAuthenticated, isInitialized, navigate]);
+  }, [isAuthenticated, isInitialized, user]);
 
   // Show error toast when error occurs
   useEffect(() => {
@@ -124,13 +125,13 @@ const Signup = () => {
       } else {
         showToast.success("Account created! Please check your email to verify your account.");
       }
-      setTimeout(() => navigate("/login"), 2000);
+      setTimeout(() => navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`), 2000);
     } else if (result.pending) {
       if (activeInviteToken) {
         showToast.error('There was a problem processing your invite. Please use the original invite link again or contact your admin.');
       } else {
-        showToast.info('Account created! Your account is pending admin approval. You will be notified by email.');
-        setTimeout(() => navigate('/login'), 3000);
+        showToast.info('Account created! Please check your email to verify your account.');
+        setTimeout(() => navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`), 3000);
       }
     } else if (result.code === 'USER_EXISTS' && activeInviteToken) {
       // Existing user trying to accept an invite — redirect to login with token preserved

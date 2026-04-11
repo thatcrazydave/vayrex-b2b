@@ -32,23 +32,28 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const getHostBase = () => {
-    const host = window.location.host;
-    if (host.startsWith('www.')) return host.substring(4);
-    return host;
-  };
 
-  // Get the intended destination from state (if redirected from protected route)
-  const from = location.state?.from?.pathname;
+  // Get the intended destination from state (if redirected from protected route).
+  // Include search params so /org-setup?orgId=... is fully restored after login.
+  const fromLocation = location.state?.from;
+  const from = fromLocation
+    ? (fromLocation.pathname || '') + (fromLocation.search || '')
+    : null;
 
-  // Redirect if already authenticated and there is a real dashboard to go to
+  // Redirect if already authenticated and there is a real dashboard to go to.
+  // `from` preserves the full path+search (e.g. /org-setup?orgId=...) so owners
+  // that were bounced here from a protected route return exactly where they came from.
   useEffect(() => {
     if (isAuthenticated && isInitialized && user) {
       const redirectTo = from || getDashboardRoute(user);
       if (redirectTo && redirectTo !== '/Login') {
         const subdomain = user?.tenantSubdomain;
-        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim()) {
-          window.location.href = `${window.location.protocol}//${subdomain.trim()}.${getHostBase()}${redirectTo}`;
+        // If we already have a `from` path that stays on the same host (e.g. /org-setup),
+        // navigate in-place — don't cross to the tenant subdomain for setup URLs.
+        const isSetupPath = redirectTo.startsWith('/org-setup');
+        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim() && !isSetupPath) {
+          const target = `${window.location.protocol}//${subdomain.trim()}${redirectTo}`;
+          window.location.href = target;
         } else {
           navigate(redirectTo, { replace: true });
         }
@@ -125,8 +130,11 @@ const Login = () => {
       // Navigate after a short delay for toast visibility
       setTimeout(() => {
         const subdomain = loggedInUser?.tenantSubdomain;
-        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim()) {
-          window.location.href = `${window.location.protocol}//${subdomain.trim()}.${getHostBase()}${redirectTo}`;
+        // org-setup must stay on the platform host — subdomain may not resolve yet
+        const isSetupPath = redirectTo.startsWith('/org-setup');
+        if (!isTenantHost && subdomain && typeof subdomain === 'string' && subdomain.trim() && !isSetupPath) {
+          const target = `${window.location.protocol}//${subdomain.trim()}${redirectTo}`;
+          window.location.href = target;
         } else {
           navigate(redirectTo, { replace: true });
         }
@@ -142,7 +150,7 @@ const Login = () => {
     // For platform-host org members, redirect to their tenant subdomain
     const sd = user?.tenantSubdomain;
     if (!isTenantHost && sd && typeof sd === 'string' && sd.trim()) {
-      window.location.href = `${window.location.protocol}//${sd.trim()}.${getHostBase()}${dashboardRoute}`;
+      window.location.href = `${window.location.protocol}//${sd.trim()}${dashboardRoute}`;
     }
     return (
       <div className="auth-container">
@@ -228,9 +236,11 @@ const Login = () => {
             )}
           </button>
 
-          <p className="auth-link">
-            Don't have an account? <Link to="/org-signup">Register your school</Link>
-          </p>
+          {!isTenantHost && (
+            <p className="auth-link">
+              Don't have an account? <Link to="/org-signup">Register your school</Link>
+            </p>
+          )}
 
           <p className="auth-link">
             <Link to="/forgot-password">Forgot your password?</Link>

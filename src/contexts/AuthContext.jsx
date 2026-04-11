@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import API, { refreshCsrfToken } from '../services/api';
+import { sk } from '../utils/storageKeys';
 
 const AuthContext = createContext();
 
@@ -12,70 +13,44 @@ export const useAuth = () => {
 };
 
 // ── Token storage strategy ──────────────────────────────────────────────────
-// Goal: survive page refresh WITHOUT losing tab isolation.
+// Goal: strict tab isolation — each tab manages its own auth state.
 //
-//  localStorage   → persists across refresh (same browser, all tabs)
-//  sessionStorage → tab-specific override; wins over localStorage
+//  sessionStorage → tab-scoped; survives page refresh within the same tab
+//                   but is NOT shared with other tabs and is cleared on tab close.
 //
-// On login  → write to BOTH (so refresh restores session)
-// On init   → copy localStorage → sessionStorage if sessionStorage is empty
-//             (the "restore on refresh" step)
-// On logout → clear BOTH
+// On login  → write to sessionStorage only
+// On logout → clear sessionStorage
 //
-// Tab isolation: a new login in a tab writes sessionStorage which overrides
-// localStorage for that tab. Other tabs are unaffected until their next
-// sessionStorage read (or refresh).
+// Tab isolation: new tabs start with empty sessionStorage → unauthenticated.
+// Page refreshes work naturally because sessionStorage persists through reloads.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TokenStore = {
-  getToken: (key) =>
-    sessionStorage.getItem(key) || localStorage.getItem(key) || null,
+  getToken: (key) => sessionStorage.getItem(sk(key)) || null,
 
   setToken: (key, value) => {
-    sessionStorage.setItem(key, value);
-    localStorage.setItem(key, value);
+    sessionStorage.setItem(sk(key), value);
   },
 
   removeToken: (key) => {
-    sessionStorage.removeItem(key);
-    localStorage.removeItem(key);
-  },
-
-  // On page load: copy localStorage values into sessionStorage so the rest
-  // of the code (which only reads sessionStorage) can find them.
-  restoreIntoSession: () => {
-    ['authToken', 'refreshToken'].forEach(key => {
-      if (!sessionStorage.getItem(key)) {
-        const persisted = localStorage.getItem(key);
-        if (persisted) sessionStorage.setItem(key, persisted);
-      }
-    });
+    sessionStorage.removeItem(sk(key));
   },
 };
 
 const AuthStorage = {
   getUser: () => {
     try {
-      const raw = sessionStorage.getItem('user') || localStorage.getItem('user');
+      const raw = sessionStorage.getItem(sk('user'));
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
     }
   },
   setUser: (user) => {
-    const json = JSON.stringify(user);
-    sessionStorage.setItem('user', json);
-    localStorage.setItem('user', json);
+    sessionStorage.setItem(sk('user'), JSON.stringify(user));
   },
   clear: () => {
-    sessionStorage.removeItem('user');
-    localStorage.removeItem('user');
-  },
-  restoreIntoSession: () => {
-    if (!sessionStorage.getItem('user')) {
-      const persisted = localStorage.getItem('user');
-      if (persisted) sessionStorage.setItem('user', persisted);
-    }
+    sessionStorage.removeItem(sk('user'));
   },
 };
 
@@ -162,7 +137,7 @@ export const AuthProvider = ({ children }) => {
     const cleanupInterval = setInterval(() => {
       try {
         // Check user data size and clean up if too large (> 100KB)
-        const userData = sessionStorage.getItem('user');
+        const userData = sessionStorage.getItem(sk('user'));
         if (userData && userData.length > 100000) {
           console.warn('User data in sessionStorage is too large, cleaning up');
           const user = JSON.parse(userData);
@@ -178,9 +153,14 @@ export const AuthProvider = ({ children }) => {
             isAdmin: user.isAdmin,
             isSuperAdmin: user.isSuperAdmin,
             usage: user.usage,
-            limits: user.limits
+            limits: user.limits,
+            // B2B fields — must survive cleanup or org members get stuck on platform host
+            orgRole: user.orgRole,
+            organizationId: user.organizationId,
+            tenantSubdomain: user.tenantSubdomain,
+            classId: user.classId,
           };
-          sessionStorage.setItem('user', JSON.stringify(essentialUser));
+          sessionStorage.setItem(sk('user'), JSON.stringify(essentialUser));
         }
 
         // Clean up expired tokens if user is not authenticated
@@ -257,22 +237,17 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
 
-      // Step 1: Restore persisted tokens into sessionStorage.
-      // sessionStorage is wiped on every page refresh.
-      // Copy from localStorage so the API interceptor can find tokens.
-      TokenStore.restoreIntoSession();
-      AuthStorage.restoreIntoSession();
+      // Step 1: Read tokens from sessionStorage (tab-scoped, survives refresh).
+      // New tabs start unauthenticated because sessionStorage is not shared.
+      const accessToken  = sessionStorage.getItem(sk('authToken')) || sessionStorage.getItem(sk('accessToken'));
+      const refreshToken = sessionStorage.getItem(sk('refreshToken'));
 
-      // Step 2: Read tokens
-      const accessToken  = sessionStorage.getItem('authToken') || sessionStorage.getItem('accessToken');
-      const refreshToken = sessionStorage.getItem('refreshToken');
-
-      // Normalize legacy key
-      if (!sessionStorage.getItem('authToken') && accessToken) {
-        sessionStorage.setItem('authToken', accessToken);
+      const finalAccessToken = sessionStorage.getItem(sk('authToken')) || sessionStorage.getItem(sk('accessToken'));
+      if (!sessionStorage.getItem(sk('authToken')) && finalAccessToken) {
+        sessionStorage.setItem(sk('authToken'), finalAccessToken);
       }
 
-      if (!accessToken && !refreshToken) {
+      if (!finalAccessToken && !refreshToken) {
         setUser(null);
         setIsInitialized(true);
         setLoading(false);
@@ -335,7 +310,7 @@ export const AuthProvider = ({ children }) => {
           throw new Error('Token verification returned success:false');
         }
       } catch (verifyError) {
-        const storedRefreshToken = sessionStorage.getItem('refreshToken');
+        const storedRefreshToken = sessionStorage.getItem(sk('refreshToken'));
 
         if (storedRefreshToken) {
           try {
@@ -504,10 +479,9 @@ export const AuthProvider = ({ children }) => {
     if (response.data.success) {
       const { accessToken, refreshToken, user } = response.data.data;
 
-      // Store tokens in BOTH storages
       TokenStore.setToken('authToken', accessToken);
       TokenStore.setToken('refreshToken', refreshToken);
-      sessionStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem(sk('user'), JSON.stringify(user));
 
       setUser(user);
   }

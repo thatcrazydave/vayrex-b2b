@@ -4,7 +4,7 @@ const auditLogSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true,
+    default: null,
   },
   action: {
     type: String,
@@ -72,5 +72,6 @@ const auditLogSchema = new mongoose.Schema({
 auditLogSchema.index({ userId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
 auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ orgId: 1, action: 1, createdAt: -1 });
 
 module.exports = mongoose.model("AuditLog", auditLogSchema);

@@ -9,7 +9,7 @@ export default function VerifyEmail() {
   const [status, setStatus] = useState('verifying'); // verifying, success, error, manual
   const [message, setMessage] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => searchParams.get('email') || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 

@@ -13,9 +13,27 @@ import { useAuth } from './contexts/AuthContext.jsx';
 
 function OrgRoute({ children, allowedRoles }) {
   const { isAuthenticated, user, loading } = useAuth();
+  const { tenant, isTenantHost } = useTenant();
+  const location = useLocation();
   if (loading) return <PageLoader />;
-  if (!isAuthenticated || !user?.orgRole) return <Navigate to="/Login" replace />;
+  if (!isAuthenticated || !user?.orgRole) {
+    // Preserve the full path+search so Login.jsx can redirect back after auth
+    return <Navigate to="/Login" state={{ from: location }} replace />;
+  }
   if (allowedRoles && !allowedRoles.includes(user.orgRole)) return <Navigate to="/" replace />;
+
+  // On the tenant host, owners and it_admins with an incomplete setup must
+  // finish the wizard before accessing any other protected route.
+  if (
+    isTenantHost &&
+    tenant &&
+    tenant.setupComplete === false &&
+    ['owner', 'it_admin'].includes(user.orgRole) &&
+    location.pathname !== '/org-setup'
+  ) {
+    return <Navigate to="/org-setup" replace />;
+  }
+
   return children;
 }
 
@@ -61,6 +79,21 @@ const Admin = lazy(() => import('./components/AdminDashboard.jsx'));
 
 // ── Platform routes (no subdomain / marketing host) ─────────────────────────
 function PlatformRoutes() {
+  const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
+
+  // An org member who lands on the platform host (e.g. from an old bookmark or
+  // the backend redirected them wrongly) gets sent to their school's subdomain
+  // so the correct tenant shell and wizard load.
+  // tenantSubdomain is returned by the login API (auth.js:405).
+  // Skip the subdomain redirect when the owner is completing setup — the setup
+  // wizard is accessible on the main domain via /org-setup?orgId=...
+  const AUTH_PAGES = ['/org-setup', '/verify-email', '/forgot-password', '/reset-password'];
+  if (isAuthenticated && user?.orgRole && user?.tenantSubdomain && !AUTH_PAGES.includes(location.pathname)) {
+    window.location.replace(`https://${user.tenantSubdomain}`);
+    return <PageLoader />;
+  }
+
   return (
     <Routes>
       <Route path="/"                  element={<Home />} />
@@ -70,15 +103,27 @@ function PlatformRoutes() {
       <Route path="/pricing"           element={<Pricing />} />
       <Route path="/Login"             element={<Login />} />
       <Route path="/login"             element={<Login />} />
-      {/* /for-schools is now the tenant portal template — redirect to signup on platform host */}
+      <Route path="/verify-email"      element={<VerifyEmail />} />
+      <Route path="/forgot-password"   element={<ForgotPassword />} />
+      <Route path="/reset-password"    element={<ResetPassword />} />
+      {/* Invite-link signup — /Signup?inviteToken=... is emailed to new members */}
+      <Route path="/Signup"            element={<Signup />} />
+      {/* /for-schools retired — now lives as the tenant portal template */}
       <Route path="/for-schools"       element={<Navigate to="/org-signup" replace />} />
+
+      {/* Org setup wizard — accessible on main domain (email links use main domain + orgId) */}
+      <Route path="/org-setup" element={
+        <OrgRoute allowedRoles={['owner', 'it_admin']}>
+          <OrgSetupWizard />
+        </OrgRoute>
+      } />
 
       {/* Vayrex super-admin stays on platform host */}
       <Route path="/admin"   element={<Admin />} />
       <Route path="/admin/*" element={<Admin />} />
 
       {/* Any other path on the platform host → school registration */}
-      <Route path="*" element={<Navigate to="/for-schools" replace />} />
+      <Route path="*" element={<Navigate to="/org-signup" replace />} />
     </Routes>
   );
 }

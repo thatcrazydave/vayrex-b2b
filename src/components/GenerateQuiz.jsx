@@ -9,6 +9,7 @@ import API, { aiSummarize, aiSummarizeText, aiChat, aiSummarizeStart, getSummary
 import { showToast } from '../utils/toast';
 import { parseContentSegments } from '../utils/codeSegments';
 import LiveCodeEditor from './common/LiveCodeEditor';
+import { sk } from '../utils/storageKeys';
 
 // ===== Map backend error codes to actionable user messages =====
 function getErrorMessage(errorData, httpStatus) {
@@ -1324,7 +1325,7 @@ function GenerateQuiz() {
       }]);
 
       const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
-      const token = sessionStorage.getItem('authToken');
+      const token = sessionStorage.getItem(sk('authToken'));
       const streamResp = await fetch(
         `${apiBase}/ai/summarize-stream/${encodeURIComponent(jobId)}`,
         {
@@ -1663,7 +1664,7 @@ function GenerateQuiz() {
     }, 2000);
 
     try {
-      const token = sessionStorage.getItem('authToken');
+      const token = sessionStorage.getItem(sk('authToken'));
       if (!token) {
         const msg = 'Please log in to use this feature';
         setError(msg);

@@ -1,18 +1,19 @@
 /**
- * OrgSetupWizard — 5-step onboarding wizard for org owners
+ * OrgSetupWizard — 6-step onboarding wizard for org owners
  *
  * Step 1: Confirm slug / subdomain
  * Step 2: Verify email domain (DNS TXT)
  * Step 3: Create first academic year
  * Step 4: Add classrooms + subjects
- * Step 5: Go live
+ * Step 5: Brand your portal
+ * Step 6: Go live
  *
  * Requires: user logged in as org owner (organizationId + orgRole === 'owner')
  */
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { FiCheckCircle, FiCircle, FiArrowRight, FiPlus, FiX } from 'react-icons/fi';
+import { FiCheckCircle, FiArrowRight, FiPlus, FiX } from 'react-icons/fi';
 import api from '../services/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -21,8 +22,11 @@ const STEP_LABELS = [
   'Email Domain',
   'Academic Year',
   'Classes & Subjects',
+  'Brand Portal',
   'Go Live',
 ];
+
+const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 
 // ── utility ──────────────────────────────────────────────────────────────────
 function inputStyle(extra = {}) {
@@ -45,9 +49,11 @@ const cardStyle = { background: 'white', borderRadius: 16, padding: 36, maxWidth
 // ── Main ─────────────────────────────────────────────────────────────────────
 function OrgSetupWizard() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const orgId = searchParams.get('orgId');
+  // On the platform host the email link provides ?orgId=...
+  // On the tenant host the URL has no query param — fall back to the
+  // authenticated user's own organisation.
+  const orgId = searchParams.get('orgId') || user?.organizationId;
 
   const [step, setStep] = useState(1);
   const [org, setOrg] = useState(null);
@@ -63,6 +69,7 @@ function OrgSetupWizard() {
   const [yearStart, setYearStart] = useState('');
   const [yearEnd, setYearEnd] = useState('');
   const [yearCreated, setYearCreated] = useState(false);
+  const [createdYearId, setCreatedYearId] = useState(null);
 
   // Step 4
   const [className, setClassName] = useState('');
@@ -71,15 +78,41 @@ function OrgSetupWizard() {
   const [subjectName, setSubjectName] = useState('');
   const [subjects, setSubjects] = useState([]);
 
+  // Step 5 — branding
+  const [branding, setBranding] = useState({
+    displayName:  '',
+    tagline:      '',
+    primaryColor: '#2563eb',
+    accentColor:  '#10b981',
+    logoUrl:      '',
+  });
+
   // ── Load org on mount ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!orgId) return;
     api.get(`/org/${orgId}/profile`)
       .then((res) => {
-        setOrg(res.data.org || res.data);
-        setStep(res.data.org?.setupStep || res.data.setupStep || 1);
+        const loadedOrg = res.data.org || res.data;
+        setOrg(loadedOrg);
+        const dbStep = loadedOrg.setupStep || 1;
+        // If they completed setup (step 6) but somehow re-entered, send to admin
+        setStep(dbStep >= 6 ? 6 : dbStep);
       })
       .catch(() => {/* org load errors are non-fatal at this stage */});
+
+    // Pre-populate branding if any was already saved
+    api.get(`/org/${orgId}/branding`)
+      .then((res) => {
+        const b = res.data?.branding ?? {};
+        setBranding({
+          displayName:  b.displayName  ?? '',
+          tagline:      b.tagline      ?? '',
+          primaryColor: b.primaryColor ?? '#2563eb',
+          accentColor:  b.accentColor  ?? '#10b981',
+          logoUrl:      b.logoUrl      ?? '',
+        });
+      })
+      .catch(() => {});
   }, [orgId]);
 
   async function getCSRF() {
@@ -90,6 +123,13 @@ function OrgSetupWizard() {
   // ── Step helpers ──────────────────────────────────────────────────────────
 
   async function confirmSlug() {
+    // Kick off DNS/Netlify provisioning immediately so it can propagate
+    // while the owner completes the remaining steps. Fire-and-forget.
+    try {
+      const csrf = await getCSRF();
+      api.post('/onboarding/org/pre-provision', {}, { headers: { 'X-CSRF-Token': csrf } })
+        .catch(() => {/* non-fatal — will retry at go-live */});
+    } catch (_) { /* non-fatal */ }
     setStep(2);
   }
 
@@ -132,7 +172,9 @@ function OrgSetupWizard() {
     setLoading(true);
     try {
       const csrf = await getCSRF();
-      await api.post(`/org/${orgId}/academic-years`, { name: yearName, startDate: yearStart, endDate: yearEnd }, { headers: { 'X-CSRF-Token': csrf } });
+      const yearRes = await api.post(`/org/${orgId}/academic-years`, { name: yearName, startDate: yearStart, endDate: yearEnd }, { headers: { 'X-CSRF-Token': csrf } });
+      const newYearId = yearRes.data.academicYear?._id || yearRes.data._id || null;
+      setCreatedYearId(newYearId);
       setYearCreated(true);
       toast.success('Academic year created');
       setStep(4);
@@ -148,7 +190,7 @@ function OrgSetupWizard() {
     setLoading(true);
     try {
       const csrf = await getCSRF();
-      const res = await api.post(`/org/${orgId}/classrooms`, { name: className.trim(), level: classLevel.trim() || className.trim() }, { headers: { 'X-CSRF-Token': csrf } });
+      const res = await api.post(`/org/${orgId}/classrooms`, { name: className.trim(), level: classLevel.trim() || className.trim(), ...(createdYearId ? { academicYearId: createdYearId } : {}) }, { headers: { 'X-CSRF-Token': csrf } });
       setClasses((prev) => [...prev, res.data.classroom || { name: className, level: classLevel }]);
       setClassName('');
       setClassLevel('');
@@ -176,14 +218,43 @@ function OrgSetupWizard() {
     }
   }
 
+  async function saveBranding(skipToNext = false) {
+    if (branding.primaryColor && !COLOR_RE.test(branding.primaryColor)) {
+      return toast.error('Primary colour must be a valid hex code (e.g. #2563eb)');
+    }
+    if (branding.accentColor && !COLOR_RE.test(branding.accentColor)) {
+      return toast.error('Accent colour must be a valid hex code');
+    }
+    setLoading(true);
+    try {
+      const csrf = await getCSRF();
+      await api.patch(`/org/${orgId}/branding`, {
+        displayName:  branding.displayName  || null,
+        tagline:      branding.tagline      || null,
+        primaryColor: branding.primaryColor || '#2563eb',
+        accentColor:  branding.accentColor  || '#10b981',
+        logoUrl:      branding.logoUrl      || null,
+      }, { headers: { 'X-CSRF-Token': csrf } });
+      toast.success('Branding saved!');
+      setStep(6);
+    } catch (err) {
+      toast.error(err.response?.data?.error?.message || 'Failed to save branding');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function goLive() {
     setLoading(true);
     try {
       const csrf = await getCSRF();
       const res = await api.post('/onboarding/org/setup-complete', {}, { headers: { 'X-CSRF-Token': csrf } });
       toast.success(res.data.message || 'Your school is now live!');
-      setStep(5);
-      setTimeout(() => navigate('/org-admin'), 2500);
+      setStep(6);
+      // Always redirect to the tenant subdomain — works whether the wizard ran
+      // on the platform host (/org-setup?orgId=...) or the tenant host (/org-setup).
+      const subdomain = org?.subdomain || `${org?.slug}.madebyovo.me`;
+      setTimeout(() => { window.location.replace(`https://${subdomain}/org-admin`); }, 2500);
     } catch (err) {
       toast.error(err.response?.data?.error?.message || 'Setup completion failed');
     } finally {
@@ -191,32 +262,28 @@ function OrgSetupWizard() {
     }
   }
 
-  // ── Stepper ───────────────────────────────────────────────────────────────
-  function StepIndicator() {
+  // ── Progress bar ──────────────────────────────────────────────────────────
+  function ProgressBar() {
+    const pct = Math.round((step / STEP_LABELS.length) * 100);
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 40, justifyContent: 'center', flexWrap: 'wrap', rowGap: 8 }}>
-        {STEP_LABELS.map((label, i) => {
-          const num = i + 1;
-          const done = step > num;
-          const active = step === num;
-          return (
-            <React.Fragment key={label}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 64 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: done ? '#16a34a' : active ? '#15803d' : '#e5e7eb',
-                  color: done || active ? 'white' : '#9ca3af', fontWeight: 700, fontSize: 13,
-                }}>
-                  {done ? <FiCheckCircle size={16} /> : num}
-                </div>
-                <span style={{ fontSize: 11, color: active ? '#15803d' : '#9ca3af', fontWeight: active ? 700 : 400, textAlign: 'center', whiteSpace: 'nowrap' }}>{label}</span>
-              </div>
-              {i < STEP_LABELS.length - 1 && (
-                <div style={{ flex: 1, height: 2, background: done ? '#16a34a' : '#e5e7eb', minWidth: 16, maxWidth: 48, marginBottom: 18 }} />
-              )}
-            </React.Fragment>
-          );
-        })}
+      <div style={{ marginBottom: 36 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#555', letterSpacing: '0.01em' }}>
+            {STEP_LABELS[step - 1]}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#111', fontVariantNumeric: 'tabular-nums', letterSpacing: '0.02em' }}>
+            {step}/{STEP_LABELS.length}
+          </span>
+        </div>
+        <div style={{ height: 5, background: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%',
+            width: `${pct}%`,
+            background: '#111',
+            borderRadius: 999,
+            transition: 'width 0.3s ease',
+          }} />
+        </div>
       </div>
     );
   }
@@ -226,7 +293,7 @@ function OrgSetupWizard() {
   if (step === 1) {
     return (
       <WizardShell>
-        <StepIndicator />
+        <ProgressBar />
         <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Confirm Your School URL</h2>
         <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
           This is the URL your school will use to access Vayrex. It cannot be changed after setup.
@@ -248,7 +315,7 @@ function OrgSetupWizard() {
     const expectedRecord = verifyResult?.expectedRecord || `vayrex-verify=${orgId}`;
     return (
       <WizardShell>
-        <StepIndicator />
+        <ProgressBar />
         <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Verify Email Domain</h2>
         <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>
           Add a DNS TXT record to prove you own your school's email domain. This enables school-wide email features.
@@ -295,7 +362,7 @@ function OrgSetupWizard() {
   if (step === 3) {
     return (
       <WizardShell>
-        <StepIndicator />
+        <ProgressBar />
         <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Create Academic Year</h2>
         <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>Set up your current academic year (e.g. 2025/2026).</p>
 
@@ -323,7 +390,7 @@ function OrgSetupWizard() {
   if (step === 4) {
     return (
       <WizardShell>
-        <StepIndicator />
+        <ProgressBar />
         <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Add Classrooms &amp; Subjects</h2>
         <p style={{ color: '#666', fontSize: 14, marginBottom: 24 }}>Add at least one classroom and one subject to continue.</p>
 
@@ -372,9 +439,109 @@ function OrgSetupWizard() {
   }
 
   if (step === 5) {
+    const setB = (key) => (val) => setBranding((b) => ({ ...b, [key]: val }));
+    const primary = branding.primaryColor || '#2563eb';
+    const accent  = branding.accentColor  || '#10b981';
+
     return (
       <WizardShell>
-        <StepIndicator />
+        <ProgressBar />
+        <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Brand Your Portal</h2>
+        <p style={{ color: '#666', fontSize: 14, marginBottom: 28 }}>
+          Customise how your school portal looks before it goes live. You can always update this later from <em>Settings → Branding</em>.
+        </p>
+
+        {/* Identity */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
+          <label style={labelStyle}>
+            School Display Name
+            <input
+              value={branding.displayName}
+              onChange={(e) => setB('displayName')(e.target.value)}
+              placeholder={org?.name || 'Greenfield Academy'}
+              style={inputStyle()}
+            />
+          </label>
+          <label style={labelStyle}>
+            Tagline
+            <input
+              value={branding.tagline}
+              onChange={(e) => setB('tagline')(e.target.value)}
+              placeholder="Shaping tomorrow's leaders"
+              style={inputStyle()}
+            />
+          </label>
+          <label style={labelStyle}>
+            Logo URL <span style={{ fontWeight: 400, color: '#888' }}>(optional)</span>
+            <input
+              value={branding.logoUrl}
+              onChange={(e) => setB('logoUrl')(e.target.value)}
+              placeholder="https://…/school-logo.png"
+              style={inputStyle()}
+            />
+          </label>
+          {branding.logoUrl && (
+            <img
+              src={branding.logoUrl}
+              alt="Logo preview"
+              style={{ maxHeight: 64, maxWidth: 180, objectFit: 'contain', borderRadius: 6, border: '1px solid #e5e7eb' }}
+            />
+          )}
+        </div>
+
+        {/* Colours */}
+        <div style={{ marginBottom: 28 }}>
+          <p style={{ ...labelStyle, marginBottom: 12 }}>Brand Colours</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            {[
+              { label: 'Primary', key: 'primaryColor', val: primary },
+              { label: 'Accent',  key: 'accentColor',  val: accent  },
+            ].map(({ label, key, val }) => (
+              <div key={key}>
+                <label style={{ fontSize: 13, color: '#555', display: 'block', marginBottom: 6 }}>{label}</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="color"
+                    value={val}
+                    onChange={(e) => setB(key)(e.target.value)}
+                    style={{ width: 36, height: 36, border: 'none', cursor: 'pointer', background: 'none', padding: 0 }}
+                  />
+                  <input
+                    type="text"
+                    value={val}
+                    onChange={(e) => setB(key)(e.target.value)}
+                    placeholder="#2563eb"
+                    style={{ ...inputStyle({ marginTop: 0, fontFamily: 'monospace', flex: 1 }) }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Live swatch */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <div style={{ flex: 1, height: 36, borderRadius: 8, background: primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>Primary</span>
+            </div>
+            <div style={{ flex: 1, height: 36, borderRadius: 8, background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#fff', fontSize: 12, fontWeight: 600 }}>Accent</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <Btn onClick={() => saveBranding()} disabled={loading}>
+            {loading ? 'Saving…' : <>Save & Continue <FiArrowRight size={14} /></>}
+          </Btn>
+          <Btn variant="ghost" onClick={() => setStep(6)}>Skip for now</Btn>
+        </div>
+      </WizardShell>
+    );
+  }
+
+  if (step === 6) {
+    return (
+      <WizardShell>
+        <ProgressBar />
         <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700 }}>Go Live</h2>
         <p style={{ color: '#666', fontSize: 14, marginBottom: 32 }}>
           Everything looks good. Clicking the button below will activate your school portal and make it accessible to your staff and students.

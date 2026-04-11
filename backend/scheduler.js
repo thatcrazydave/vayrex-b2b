@@ -253,6 +253,24 @@ cron.schedule("0 * * * *", async () => {
 
 Logger.info("Scheduler initialized");
 
+// ── Weekly data retention purge — Sundays at 3:00 AM ─────────────────────
+let _retentionRunning = false;
+cron.schedule("0 3 * * 0", async () => {
+  if (_retentionRunning) {
+    Logger.warn("Data retention purge skipped — previous run still active");
+    return;
+  }
+  _retentionRunning = true;
+  try {
+    const { runRetentionPurge } = require("./workers/dataRetentionWorker");
+    await runRetentionPurge(false);
+  } catch (err) {
+    Logger.error("Data retention purge failed", { error: err.message });
+  } finally {
+    _retentionRunning = false;
+  }
+});
+
 // ── Startup: sync org member limits from org plan ─────────────────────────
 // B2B: all members inherit limits from their org's plan (school_starter / school_pro / enterprise).
 // This ensures limits stay in sync if an org's plan changes.

@@ -22,8 +22,9 @@ async function connectDatabase(mongoUri) {
 
   try {
     await mongoose.connect(resolvedUri, {
-      maxPoolSize: 10,
-      minPoolSize: 2,
+      maxPoolSize: 50,
+      minPoolSize: 5,
+      maxIdleTimeMS: 30000,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       family: 4, // Use IPv4
@@ -73,9 +74,10 @@ function setupEventHandlers() {
 
       setTimeout(async () => {
         try {
-          await mongoose.connect(process.env.MONGODB_URI, {
-            maxPoolSize: 10,
-            minPoolSize: 2,
+          await mongoose.connect(process.env.MONGODB_B2B_URI || process.env.MONGODB_URI, {
+            maxPoolSize: 50,
+            minPoolSize: 5,
+            maxIdleTimeMS: 30000,
             serverSelectionTimeoutMS: 5000,
             socketTimeoutMS: 45000,
             family: 4,

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { FiArrowRight, FiArrowLeft, FiCheck, FiX } from 'react-icons/fi';
+import { FiArrowRight, FiArrowLeft, FiCheck, FiX, FiEye, FiEyeOff } from 'react-icons/fi';
 import api from '../services/api.js';
+import { sk } from '../utils/storageKeys.js';
 
 function getPasswordChecks(password) {
   return {
@@ -95,7 +96,11 @@ function OrgSignup() {
   const [slugAvailable, setSlugAvailable] = useState(null);
   const [slugChecking, setSlugChecking] = useState(false);
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const [registered, setRegistered] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
 
   // ── Slug preview ─────────────────────────────────────────────────────────
   const debounceRef = React.useRef(null);
@@ -171,16 +176,15 @@ function OrgSignup() {
 
       // Auto-login: store tokens so the setup wizard is authenticated
       if (res.data.accessToken) {
-        sessionStorage.setItem('authToken', res.data.accessToken);
-        sessionStorage.setItem('refreshToken', res.data.refreshToken);
+        sessionStorage.setItem(sk('authToken'), res.data.accessToken);
+        sessionStorage.setItem(sk('refreshToken'), res.data.refreshToken);
         if (res.data.user) {
-          sessionStorage.setItem('user', JSON.stringify(res.data.user));
+          sessionStorage.setItem(sk('user'), JSON.stringify(res.data.user));
         }
       }
 
-      toast.success('School registered! Redirecting to setup wizard…');
-      // Force a full page reload to re-initialize auth context with the new tokens
-      window.location.href = `/org-setup?orgId=${res.data.orgId}`;
+      setRegisteredEmail(form.contactEmail);
+      setRegistered(true);
     } catch (err) {
       const msg = err.response?.data?.error?.message || err.response?.data?.message || 'Registration failed. Please try again.';
       toast.error(msg);
@@ -193,9 +197,9 @@ function OrgSignup() {
   const slugNote = slugChecking
     ? 'Checking…'
     : slugAvailable === true
-    ? `✓ Available — your portal will be at ${slugPreview}.madebyovo.me`
+    ? ` Available — your portal will be at ${slugPreview}.madebyovo.me`
     : slugAvailable === false
-    ? '✗ This name is already taken — try a different one'
+    ? ' This name is already taken — try a different one'
     : slugPreview.length >= 3
     ? `Portal will be at ${slugPreview}.madebyovo.me`
     : '';
@@ -212,6 +216,54 @@ function OrgSignup() {
     marginTop: 6,
   };
   const labelStyle = { fontSize: 14, fontWeight: 600, color: '#333', display: 'block' };
+
+  const toggleStyle = {
+    position: 'absolute',
+    right: 12,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#6b7280',
+    display: 'flex',
+    alignItems: 'center',
+    padding: 4,
+    marginTop: 3,
+    zIndex: 10,
+  };
+
+  if (registered) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 16px' }}>
+        <div style={{ background: 'white', borderRadius: 16, padding: 48, maxWidth: 480, width: '100%', boxShadow: '0 4px 24px rgba(22,163,74,0.10)', border: '1px solid #bbf7d0', textAlign: 'center' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
+            <FiCheck size={28} color="#16a34a" strokeWidth={2.5} />
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 800, color: '#0a0a0a', margin: '0 0 12px' }}>You're almost in!</h2>
+          <p style={{ fontSize: 15, color: '#374151', lineHeight: 1.6, margin: '0 0 8px' }}>
+            We've sent a setup link to
+          </p>
+          <p style={{ fontSize: 15, fontWeight: 700, color: '#16a34a', margin: '0 0 20px', wordBreak: 'break-all' }}>
+            {registeredEmail}
+          </p>
+          <p style={{ fontSize: 14, color: '#6b7280', lineHeight: 1.6, margin: '0 0 32px' }}>
+            Open that email and click the link to complete your school's setup. It only takes a few minutes.
+          </p>
+          <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
+            Didn't get it? Check your spam folder or{' '}
+            <button
+              onClick={() => setRegistered(false)}
+              style={{ background: 'none', border: 'none', color: '#16a34a', fontWeight: 600, fontSize: 13, cursor: 'pointer', padding: 0 }}
+            >
+              try again
+            </button>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 16px' }}>
@@ -308,35 +360,51 @@ function OrgSignup() {
 
           {/* Password */}
           <div style={{ marginBottom: 20 }}>
-            <label style={labelStyle}>
-              Password *
+            <label style={labelStyle}>Password *</label>
+            <div style={{ position: 'relative' }}>
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 name="contactPassword"
                 value={form.contactPassword}
                 onChange={handleChange}
                 placeholder="Min. 8 characters"
                 required
-                style={inputStyle}
+                style={{ ...inputStyle, paddingRight: 40 }}
               />
-            </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={toggleStyle}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+              </button>
+            </div>
             <PasswordChecklist password={form.contactPassword} />
           </div>
 
           {/* Confirm password */}
           <div style={{ marginBottom: 28 }}>
-            <label style={labelStyle}>
-              Confirm Password *
+            <label style={labelStyle}>Confirm Password *</label>
+            <div style={{ position: 'relative' }}>
               <input
-                type="password"
+                type={showConfirmPassword ? "text" : "password"}
                 name="confirmPassword"
                 value={form.confirmPassword}
                 onChange={handleChange}
                 placeholder="Re-enter password"
                 required
-                style={inputStyle}
+                style={{ ...inputStyle, paddingRight: 40 }}
               />
-            </label>
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                style={toggleStyle}
+                aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+              >
+                {showConfirmPassword ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+              </button>
+            </div>
           </div>
 
           <button

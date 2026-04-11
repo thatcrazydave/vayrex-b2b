@@ -25,6 +25,7 @@ const Subject = require("../models/Subject");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const emailService = require("../services/emailService");
+const { provisionSchoolSubdomain } = require("../services/provisioningService");
 const Logger = require("../logger");
 const { isValidEmail } = require("../middleware/sanitizer");
 const { authenticateToken } = require("../middleware/auth");
@@ -87,23 +88,21 @@ router.get("/check-slug", async (req, res) => {
       "status",
     ];
     if (RESERVED.includes(slug)) {
+      Logger.info("[ONBOARDING] check-slug → reserved", { raw, slug });
       return sendSuccess(res, { available: false, slug, reason: "reserved" });
     }
 
     const exists = await Organization.findOne({ slug }).lean().select("_id");
+    Logger.info("[ONBOARDING] check-slug", { raw, slug, available: !exists });
     return sendSuccess(res, { available: !exists, slug });
   } catch (err) {
-    Logger.error("check-slug error", { error: err.message });
+    Logger.error("[ONBOARDING] check-slug error", { error: err.message });
     return sendError(res, 500, "Internal server error", "INTERNAL_ERROR");
   }
 });
 
 // ── POST /api/onboarding/org/register ────────────────────────────────────────
 // Creates the org document + owner User doc. Sends welcome email.
-// Caller: unauthenticated public signup form (OrgSignup.jsx)
-// No authenticateToken — the owner account is created here.
-// validateOrgRegister runs first and rejects any malformed input before
-// the transaction even opens.
 
 router.post("/register", validateOrgRegister, async (req, res) => {
   const session = await mongoose.startSession();
@@ -119,9 +118,17 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       estimatedEnrollment,
     } = req.body;
 
-    // estimatedEnrollment already passed validateOrgRegister — safe to parse directly
     const enrollment = parseInt(estimatedEnrollment, 10) || 100;
     const normalizedEmail = contactEmail.toLowerCase().trim();
+
+    Logger.info("[ONBOARDING] register → started", {
+      orgName,
+      contactName,
+      contactEmail: normalizedEmail,
+      schoolType,
+      estimatedEnrollment: enrollment,
+      ip: req.ip,
+    });
 
     // ── Check for duplicate owner email ──
     const existingUser = await User.findOne({ email: normalizedEmail })
@@ -130,6 +137,7 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       .session(session);
     if (existingUser) {
       await session.abortTransaction();
+      Logger.warn("[ONBOARDING] register → email already exists", { email: normalizedEmail });
       return sendError(
         res,
         409,
@@ -142,7 +150,6 @@ router.post("/register", validateOrgRegister, async (req, res) => {
     let slug = slugify(orgName.trim());
     if (slug.length < 3) slug = slug.padEnd(3, "x");
 
-    // Ensure slug uniqueness — append counter if needed
     let slugCandidate = slug;
     let counter = 1;
     while (
@@ -151,8 +158,10 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       slugCandidate = `${slug}-${counter++}`;
     }
     slug = slugCandidate;
-
     const subdomain = `${slug}.madebyovo.me`;
+
+    Logger.info("[ONBOARDING] register → slug resolved", { orgName, slug, subdomain });
+
     const capacity = Organization.calcCapacity(enrollment);
 
     // ── Create org ──
@@ -175,12 +184,19 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       { session },
     );
 
+    Logger.info("[ONBOARDING] register → org document created", {
+      orgId: org._id,
+      slug: org.slug,
+      subdomain: org.subdomain,
+      plan: org.plan,
+    });
+
     // ── Create owner user ──
     const owner = new User({
       username: contactName.trim(),
       fullname: contactName.trim(),
       email: normalizedEmail,
-      password: contactPassword, // User model pre-save hook hashes this
+      password: contactPassword,
       role: "user",
       organizationId: org._id,
       orgRole: "owner",
@@ -188,27 +204,41 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       emailVerified: false,
     });
 
-    // Generate email verification token (re-use existing mechanism if present)
     if (typeof owner.generateVerificationToken === "function") {
       owner.generateVerificationToken();
     }
 
     await owner.save({ session });
 
-    // Backfill billingContactId now that owner has an _id
     org.billingContactId = owner._id;
     await org.save({ session });
 
     await session.commitTransaction();
 
-    // ── Post-commit side-effects (non-fatal) ──
+    Logger.info("[ONBOARDING] register → transaction committed", {
+      orgId: org._id,
+      ownerId: owner._id,
+      ownerEmail: normalizedEmail,
+    });
+
+    // ── Post-commit side-effects ──
     const setupUrl = `${process.env.FRONTEND_URL}/org-setup?orgId=${org._id}`;
+
+    Logger.info("[ONBOARDING] register → sending welcome email", {
+      to: normalizedEmail,
+      setupUrl,
+    });
+
     emailService
       .sendOrgWelcomeEmail(normalizedEmail, contactName.trim(), orgName.trim(), setupUrl)
+      .then(() => {
+        Logger.info("[ONBOARDING] register → welcome email sent", { to: normalizedEmail });
+      })
       .catch((emailErr) => {
-        Logger.error("sendOrgWelcomeEmail failed (non-fatal)", {
+        Logger.error("[ONBOARDING] register → welcome email FAILED (non-fatal)", {
           error: emailErr.message,
           orgId: org._id,
+          to: normalizedEmail,
         });
       });
 
@@ -220,9 +250,10 @@ router.post("/register", validateOrgRegister, async (req, res) => {
       ip: req.ip,
     }).catch(() => {});
 
-    Logger.info("Org registered", {
+    Logger.info("[ONBOARDING] register → complete", {
       orgId: org._id,
       slug: org.slug,
+      subdomain: org.subdomain,
       ownerEmail: normalizedEmail,
     });
 
@@ -239,7 +270,7 @@ router.post("/register", validateOrgRegister, async (req, res) => {
     );
   } catch (err) {
     await session.abortTransaction().catch(() => {});
-    Logger.error("org/register error", { error: err.message, stack: err.stack });
+    Logger.error("[ONBOARDING] register → ERROR", { error: err.message, stack: err.stack });
     if (err.code === 11000) {
       return sendError(
         res,
@@ -254,13 +285,11 @@ router.post("/register", validateOrgRegister, async (req, res) => {
   }
 });
 
-// All routes below this point require the caller to be authenticated as the org owner.
+// All routes below require the caller to be authenticated as the org owner.
 
 router.use(authenticateToken);
 
 // ── POST /api/onboarding/org/verify-domain ────────────────────────────────────
-// Checks DNS TXT record `vayrex-verify=<orgId>` on the supplied email domain.
-// Frontend prompts the user to add this TXT record in their DNS provider.
 
 router.post("/verify-domain", requireOwner, async (req, res) => {
   try {
@@ -275,26 +304,44 @@ router.post("/verify-domain", requireOwner, async (req, res) => {
       .toLowerCase()
       .trim();
 
-    // Basic domain format sanity check
+    Logger.info("[ONBOARDING] verify-domain → started", {
+      orgId: req.user.organizationId,
+      rawDomain: domain,
+      cleanDomain,
+    });
+
     if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z]{2,})+$/.test(cleanDomain)) {
+      Logger.warn("[ONBOARDING] verify-domain → invalid format", { cleanDomain });
       return sendError(res, 400, "Invalid domain format");
     }
 
-    const org = await Organization.findOne({
-      _id: req.user.organizationId,
-    }).select("_id name emailDomain emailProvisioned");
+    const org = await Organization.findOne({ _id: req.user.organizationId }).select(
+      "_id name emailDomain emailProvisioned",
+    );
 
     if (!org) {
       return sendError(res, 404, "Organisation not found", "ORG_NOT_FOUND");
     }
 
     const expectedRecord = `vayrex-verify=${org._id.toString()}`;
+    Logger.info("[ONBOARDING] verify-domain → looking up DNS TXT", {
+      orgId: org._id,
+      domain: cleanDomain,
+      expectedRecord,
+    });
 
     let txtRecords;
     try {
       txtRecords = await dns.resolveTxt(cleanDomain);
+      Logger.info("[ONBOARDING] verify-domain → DNS TXT records found", {
+        domain: cleanDomain,
+        records: txtRecords.flat(),
+      });
     } catch (dnsErr) {
-      Logger.warn("DNS lookup failed", { domain: cleanDomain, error: dnsErr.message });
+      Logger.warn("[ONBOARDING] verify-domain → DNS lookup failed", {
+        domain: cleanDomain,
+        error: dnsErr.message,
+      });
       return sendSuccess(res, {
         verified: false,
         domain: cleanDomain,
@@ -303,11 +350,16 @@ router.post("/verify-domain", requireOwner, async (req, res) => {
       });
     }
 
-    // txtRecords is an array of arrays
     const flat = txtRecords.flat();
-    const verified = flat.some((record) => record === expectedRecord);
+    const verified = flat.some((r) => r === expectedRecord);
 
     if (!verified) {
+      Logger.warn("[ONBOARDING] verify-domain → TXT record NOT found", {
+        orgId: org._id,
+        domain: cleanDomain,
+        expectedRecord,
+        foundRecords: flat,
+      });
       return sendSuccess(res, {
         verified: false,
         domain: cleanDomain,
@@ -316,33 +368,38 @@ router.post("/verify-domain", requireOwner, async (req, res) => {
       });
     }
 
-    // Update org — store the verified domain but don't set emailProvisioned yet
-    // (that happens in the next step: /provision-email)
     org.emailDomain = cleanDomain;
     await org.save();
 
-    Logger.info("Domain verified", { orgId: org._id, domain: cleanDomain });
+    Logger.info("[ONBOARDING] verify-domain → VERIFIED", {
+      orgId: org._id,
+      domain: cleanDomain,
+    });
     return sendSuccess(res, { verified: true, domain: cleanDomain });
   } catch (err) {
-    Logger.error("verify-domain error", { error: err.message });
+    Logger.error("[ONBOARDING] verify-domain → ERROR", { error: err.message });
     return sendError(res, 500, "Domain verification failed", "INTERNAL_ERROR");
   }
 });
 
 // ── POST /api/onboarding/org/provision-email ─────────────────────────────────
-// Called after DNS verification succeeds. Marks emailProvisioned = true.
 
 router.post("/provision-email", requireOwner, async (req, res) => {
   try {
-    const org = await Organization.findOne({
-      _id: req.user.organizationId,
-    }).select("_id emailDomain emailProvisioned setupStep");
+    Logger.info("[ONBOARDING] provision-email → started", { orgId: req.user.organizationId });
+
+    const org = await Organization.findOne({ _id: req.user.organizationId }).select(
+      "_id emailDomain emailProvisioned setupStep",
+    );
 
     if (!org) {
       return sendError(res, 404, "Organisation not found", "ORG_NOT_FOUND");
     }
 
     if (!org.emailDomain) {
+      Logger.warn("[ONBOARDING] provision-email → no verified domain on record", {
+        orgId: org._id,
+      });
       return sendError(
         res,
         400,
@@ -355,41 +412,111 @@ router.post("/provision-email", requireOwner, async (req, res) => {
     if (org.setupStep < 2) org.setupStep = 2;
     await org.save();
 
-    Logger.info("Email provisioned", { orgId: org._id, domain: org.emailDomain });
+    Logger.info("[ONBOARDING] provision-email → complete", {
+      orgId: org._id,
+      domain: org.emailDomain,
+      setupStep: org.setupStep,
+    });
+
     return sendSuccess(res, {
       emailProvisioned: true,
       emailDomain: org.emailDomain,
       setupStep: org.setupStep,
     });
   } catch (err) {
-    Logger.error("provision-email error", { error: err.message });
+    Logger.error("[ONBOARDING] provision-email → ERROR", { error: err.message });
     return sendError(res, 500, "Provisioning failed", "INTERNAL_ERROR");
   }
 });
 
+// ── POST /api/onboarding/org/pre-provision ───────────────────────────────────
+// Called right after the owner confirms their URL in Step 1.
+// Kicks off Netlify + Cloudflare provisioning early so DNS can propagate
+// while the owner completes the remaining setup steps.  Fire-and-forget —
+// we respond immediately and don't block on provisioning results.
+
+router.post("/pre-provision", requireOwner, async (req, res) => {
+  try {
+    const org = await Organization.findOne({ _id: req.user.organizationId }).select(
+      "_id slug subdomain name setupComplete",
+    );
+
+    if (!org) return sendError(res, 404, "Organisation not found", "ORG_NOT_FOUND");
+
+    // Skip if already live — no need to re-provision.
+    if (org.setupComplete) {
+      return sendSuccess(res, { triggered: false, reason: "already_live" });
+    }
+
+    Logger.info("[ONBOARDING] pre-provision → firing early provisioning", {
+      orgId: org._id,
+      slug: org.slug,
+      subdomain: org.subdomain,
+    });
+
+    // Fire-and-forget — we do not await this.
+    provisionSchoolSubdomain({ slug: org.slug, subdomain: org.subdomain })
+      .then((results) => {
+        Logger.info("[ONBOARDING] pre-provision → results", {
+          orgId: org._id,
+          netlify: results.netlify,
+          dns: results.dns,
+        });
+      })
+      .catch((err) => {
+        Logger.warn(
+          "[ONBOARDING] pre-provision → provisioning error (will retry at go-live)",
+          {
+            orgId: org._id,
+            error: err.message,
+          },
+        );
+      });
+
+    return sendSuccess(res, { triggered: true });
+  } catch (err) {
+    Logger.error("[ONBOARDING] pre-provision → ERROR", { error: err.message });
+    return sendError(res, 500, "Pre-provisioning failed", "INTERNAL_ERROR");
+  }
+});
+
 // ── POST /api/onboarding/org/setup-complete ───────────────────────────────────
-// Final wizard step. Validates the org has:
-//   - At least 1 active AcademicYear
-//   - At least 1 Classroom
-//   - At least 1 Subject
-// Then sets setupComplete = true, isActive = true, setupStep = 5.
 
 router.post("/setup-complete", requireOwner, async (req, res) => {
   try {
     const orgId = req.user.organizationId;
 
-    const [org, yearCount, classCount, subjectCount] = await Promise.all([
-      Organization.findById(orgId).select("_id name setupComplete isActive setupStep"),
+    Logger.info("[ONBOARDING] setup-complete → started", {
+      orgId,
+      ownerEmail: req.user.email,
+    });
+
+    const [org, activeYearCount, anyYearCount, classCount, subjectCount] = await Promise.all([
+      Organization.findById(orgId).select(
+        "_id name slug subdomain setupComplete isActive setupStep",
+      ),
       AcademicYear.countDocuments({ orgId, isActive: true }),
+      AcademicYear.countDocuments({ orgId }),
       Classroom.countDocuments({ orgId }),
       Subject.countDocuments({ orgId, isActive: true }),
     ]);
+
+    Logger.info("[ONBOARDING] setup-complete → checklist", {
+      orgId,
+      orgName: org?.name,
+      activeYears: activeYearCount,
+      totalYears: anyYearCount,
+      classrooms: classCount,
+      subjects: subjectCount,
+      alreadyComplete: org?.setupComplete,
+    });
 
     if (!org) {
       return sendError(res, 404, "Organisation not found", "ORG_NOT_FOUND");
     }
 
     if (org.setupComplete) {
+      Logger.info("[ONBOARDING] setup-complete → already completed, skipping", { orgId });
       return sendSuccess(res, {
         setupComplete: true,
         message: "Setup was already completed.",
@@ -397,12 +524,26 @@ router.post("/setup-complete", requireOwner, async (req, res) => {
       });
     }
 
+    // If a year exists but none are active, auto-activate the most recent one
+    if (activeYearCount === 0 && anyYearCount > 0) {
+      Logger.info(
+        "[ONBOARDING] setup-complete → no active year found, auto-activating latest",
+        { orgId },
+      );
+      await AcademicYear.findOneAndUpdate(
+        { orgId },
+        { $set: { isActive: true } },
+        { sort: { createdAt: -1 } },
+      );
+    }
+
     const missing = [];
-    if (yearCount === 0) missing.push("an active academic year");
+    if (anyYearCount === 0) missing.push("an academic year");
     if (classCount === 0) missing.push("at least one classroom");
     if (subjectCount === 0) missing.push("at least one subject");
 
     if (missing.length > 0) {
+      Logger.warn("[ONBOARDING] setup-complete → INCOMPLETE", { orgId, missing });
       return sendError(
         res,
         422,
@@ -413,8 +554,14 @@ router.post("/setup-complete", requireOwner, async (req, res) => {
 
     org.setupComplete = true;
     org.isActive = true;
-    org.setupStep = 5;
+    org.setupStep = 6;
     await org.save();
+
+    Logger.info("[ONBOARDING] setup-complete → org marked live", {
+      orgId,
+      name: org.name,
+      subdomain: org.subdomain,
+    });
 
     AuditLog.create({
       userId: req.user.id,
@@ -424,7 +571,79 @@ router.post("/setup-complete", requireOwner, async (req, res) => {
       ip: req.ip,
     }).catch(() => {});
 
-    Logger.info("Org setup completed", { orgId, name: org.name });
+    // Auto-provision Netlify alias + Cloudflare DNS
+    Logger.info("[ONBOARDING] setup-complete → triggering provisioning", {
+      orgId,
+      slug: org.slug,
+      subdomain: org.subdomain,
+    });
+
+    provisionSchoolSubdomain({ slug: org.slug, subdomain: org.subdomain })
+      .then((results) => {
+        const netlifyOk = results.netlify?.added || results.netlify?.alreadyExists;
+        const dnsOk = results.dns?.created || results.dns?.alreadyExists;
+        const dnsSkipped = results.dns?.skipped;
+
+        Logger.info("[ONBOARDING] setup-complete → provisioning results", {
+          orgId,
+          slug: org.slug,
+          netlify: results.netlify,
+          dns: results.dns,
+          netlifyOk,
+          dnsOk,
+          dnsSkipped,
+        });
+
+        if (!netlifyOk || !dnsOk) {
+          Logger.warn(
+            "[ONBOARDING] setup-complete → provisioning partial/failed — sending fallback email",
+            {
+              orgId,
+              netlifyFailed: !!results.netlify?.error,
+              dnsFailed: !!results.dns?.error,
+              dnsSkipped,
+            },
+          );
+          emailService.sendDnsProvisioningAlert({
+            orgId: orgId.toString(),
+            orgName: org.name,
+            slug: org.slug,
+            subdomain: org.subdomain,
+            ownerEmail: req.user.email,
+            ownerName: req.user.name || req.user.email,
+          });
+        } else {
+          Logger.info(
+            "[ONBOARDING] setup-complete → provisioning fully automated, no manual action needed",
+            {
+              orgId,
+              subdomain: org.subdomain,
+            },
+          );
+        }
+      })
+      .catch((err) => {
+        Logger.error(
+          "[ONBOARDING] setup-complete → provisioning CRASHED, sending fallback email",
+          {
+            orgId,
+            error: err.message,
+          },
+        );
+        emailService.sendDnsProvisioningAlert({
+          orgId: orgId.toString(),
+          orgName: org.name,
+          slug: org.slug,
+          subdomain: org.subdomain,
+          ownerEmail: req.user.email,
+          ownerName: req.user.name || req.user.email,
+        });
+      });
+
+    Logger.info("[ONBOARDING] setup-complete → response sent to client", {
+      orgId,
+      subdomain: org.subdomain,
+    });
 
     return sendSuccess(res, {
       setupComplete: true,
@@ -433,7 +652,10 @@ router.post("/setup-complete", requireOwner, async (req, res) => {
       message: `${org.name} is now live! Your portal is at https://${org.subdomain}`,
     });
   } catch (err) {
-    Logger.error("setup-complete error", { error: err.message });
+    Logger.error("[ONBOARDING] setup-complete → ERROR", {
+      error: err.message,
+      stack: err.stack,
+    });
     return sendError(res, 500, "Failed to complete setup", "INTERNAL_ERROR");
   }
 });

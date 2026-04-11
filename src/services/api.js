@@ -1,4 +1,5 @@
 import axios from "axios";
+import { sk } from "../utils/storageKeys";
 import { getErrorMessage, CRITICAL_ERRORS } from "../utils/errorHandler";
 import { showToast } from "../utils/toast";
 
@@ -20,6 +21,28 @@ const API = axios.create({
 let csrfToken = null;
 let csrfPromise = null;
 
+const fetchCsrfWithRetry = async (retries = 3, delay = 1000) => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.get(
+        `${import.meta.env.VITE_API_URL || "http://localhost:5002/api"}/csrf-token`,
+        {
+          withCredentials: true,
+          headers: {
+            "Bypass-Tunnel-Reminder": "true",
+            "ngrok-skip-browser-warning": "true",
+          },
+          timeout: 10000,
+        },
+      );
+      return response.data.csrfToken;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delay * attempt));
+    }
+  }
+};
+
 const getCsrfToken = async (force = false) => {
   // Return cached token if available and not forced
   if (csrfToken && !force) {
@@ -31,18 +54,9 @@ const getCsrfToken = async (force = false) => {
     return csrfPromise;
   }
 
-  // Fetch new token (no cookies/credentials needed for stateless CSRF)
-  csrfPromise = axios
-    .get(`${import.meta.env.VITE_API_URL || "http://localhost:5002/api"}/csrf-token`, {
-      withCredentials: true,
-      headers: {
-        "Bypass-Tunnel-Reminder": "true",
-        "ngrok-skip-browser-warning": "true",
-      },
-      timeout: 10000, // 10s timeout for CSRF fetch
-    })
-    .then((response) => {
-      csrfToken = response.data.csrfToken;
+  csrfPromise = fetchCsrfWithRetry()
+    .then((token) => {
+      csrfToken = token;
       csrfPromise = null;
 
       // Auto-refresh token before it expires (refresh at 90 min mark for 2h token)
@@ -56,7 +70,6 @@ const getCsrfToken = async (force = false) => {
       return csrfToken;
     })
     .catch((err) => {
-      console.error("Failed to fetch CSRF token:", err);
       csrfPromise = null;
       throw err;
     });
@@ -83,14 +96,12 @@ const processQueue = (error, token = null) => {
 //  Request Interceptor: Add access token and CSRF token
 API.interceptors.request.use(
   async (config) => {
-    // Add 7-day access token from sessionStorage (pure tab isolation)
+    // Add access token — read from the hostname-scoped sessionStorage key
+    // so admin (madebyovo.me) and tenant (school.madebyovo.me) tabs never
+    // share a token even when localStorage is involved.
     const accessToken =
-      sessionStorage.getItem("authToken") || sessionStorage.getItem("accessToken");
+      sessionStorage.getItem(sk("authToken")) || sessionStorage.getItem(sk("accessToken"));
     if (accessToken) {
-      // Backward compatibility: migrate legacy key if needed
-      if (!sessionStorage.getItem("authToken")) {
-        sessionStorage.setItem("authToken", accessToken);
-      }
       config.headers.Authorization = `Bearer ${accessToken}`;
     }
 
@@ -214,9 +225,9 @@ API.interceptors.response.use(
       // Prevent infinite loop if refresh endpoint itself returns 401
       const isRefreshEndpoint = originalRequest.url?.includes("/auth/refresh");
       if (isRefreshEndpoint) {
-        sessionStorage.removeItem("authToken");
-        sessionStorage.removeItem("refreshToken");
-        sessionStorage.removeItem("user");
+        sessionStorage.removeItem(sk("authToken"));
+        sessionStorage.removeItem(sk("refreshToken"));
+        sessionStorage.removeItem(sk("user"));
         return Promise.reject(error);
       }
 
@@ -239,7 +250,7 @@ API.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const refreshToken = sessionStorage.getItem("refreshToken");
+        const refreshToken = sessionStorage.getItem(sk("refreshToken"));
         if (!refreshToken) {
           throw new Error("No refresh token");
         }
@@ -253,8 +264,8 @@ API.interceptors.response.use(
         if (refreshResponse.data.success) {
           const { accessToken, refreshToken: newRefreshToken } = refreshResponse.data.data;
 
-          sessionStorage.setItem("authToken", accessToken);
-          sessionStorage.setItem("refreshToken", newRefreshToken);
+          sessionStorage.setItem(sk("authToken"), accessToken);
+          sessionStorage.setItem(sk("refreshToken"), newRefreshToken);
 
           API.defaults.headers.common["Authorization"] = `Bearer ${accessToken}`;
           originalRequest.headers["Authorization"] = `Bearer ${accessToken}`;
@@ -268,9 +279,9 @@ API.interceptors.response.use(
         }
       } catch (err) {
         processQueue(err, null);
-        sessionStorage.removeItem("authToken");
-        sessionStorage.removeItem("refreshToken");
-        sessionStorage.removeItem("user");
+        sessionStorage.removeItem(sk("authToken"));
+        sessionStorage.removeItem(sk("refreshToken"));
+        sessionStorage.removeItem(sk("user"));
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
@@ -610,7 +621,7 @@ export function subscribeToCourseOutlineStream(
   { onTitle, onChapterOverview, onSubChapter, onChapter, onComplete, onError },
 ) {
   const controller = new AbortController();
-  const token = sessionStorage.getItem("authToken");
+  const token = sessionStorage.getItem(sk("authToken"));
   const baseURL = import.meta.env.VITE_API_URL || "http://localhost:5002/api";
 
   fetch(`${baseURL}/ai/summarize-stream/${encodeURIComponent(jobId)}`, {

@@ -30,8 +30,10 @@ const {
   getUserActiveJobs,
   incrementUserActiveJobs,
 } = require("./services/taskQueue");
-require("./workers/quizWorker");
-require("./scheduler"); // Start all cron jobs (daily reset, monthly reset, health checks, etc.)
+if (process.env.BULLMQ_WORKER === "true" || !process.env.CLUSTER_MODE) {
+  require("./workers/quizWorker");
+  require("./scheduler"); // Start all cron jobs (daily reset, monthly reset, health checks, etc.)
+}
 // B2B: S3 presigner removed — signed URLs handled by storageService
 const Logger = require("./logger");
 const ErrorCodes = require("./errorCodes");
@@ -72,6 +74,8 @@ const assignmentRoutes = require("./routes/assignments");
 const attendanceRoutes = require("./routes/attendance");
 const announcementRoutes = require("./routes/announcements");
 const guardianRoutes = require("./routes/guardian");
+const { safetyValve } = require("./middleware/safetyValve");
+const { orgAuditLogger } = require("./middleware/orgAuditLogger");
 
 // B2B: pre-load org models so Mongoose registers them before any route uses them
 require("./models/Organization");
@@ -151,6 +155,9 @@ app.use(
     },
   }),
 );
+
+// ===== SAFETY VALVE — event loop overload protection =====
+app.use(safetyValve);
 
 // ===== GLOBAL REQUEST TIMEOUT =====
 app.use((req, res, next) => {
@@ -319,12 +326,23 @@ const BANNED_BODY_FIELDS = [
   "seatAssignedAt",
   "guardianOf",
 ];
+// These are stripped even on admin routes (prototype pollution + org isolation)
+const ALWAYS_BANNED_FIELDS = [
+  "__proto__",
+  "constructor",
+  "prototype",
+  "organizationId",
+  "orgId",
+  "orgRole",
+  "seatAssignedAt",
+  "guardianOf",
+];
 app.use((req, res, next) => {
   if (!req.body || typeof req.body !== "object") return next();
   const path = (req.path || "").toLowerCase();
-  // Only allow role/admin fields on actual admin routes
-  if (path.startsWith("/api/admin/")) return next();
-  for (const field of BANNED_BODY_FIELDS) {
+  // Admin routes may legitimately set role/isActive — only strip the always-banned org fields
+  const fields = path.startsWith("/api/admin/") ? ALWAYS_BANNED_FIELDS : BANNED_BODY_FIELDS;
+  for (const field of fields) {
     if (req.body[field] !== undefined) {
       Logger.warn("Body parameter pollution blocked", {
         ip: req.ip,
@@ -1051,12 +1069,7 @@ for (const p of academicPaths) {
 // Upload, AI generation, notes, and export routes are restricted to
 // teacher / owner / org_admin in the B2B context.
 // Students and guardians cannot create content — only consume it.
-const teacherOnlyPaths = [
-  "/api/upload",
-  "/api/ai",
-  "/api/notes",
-  "/api/export",
-];
+const teacherOnlyPaths = ["/api/upload", "/api/ai", "/api/notes", "/api/export"];
 const teacherAllowedRoles = ["teacher", "owner", "org_admin"];
 for (const p of teacherOnlyPaths) {
   app.use(p, (req, res, next) => {
@@ -1082,6 +1095,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/onboarding/org", checkDatabaseHealth);
 app.use("/api/onboarding/org", onboardingRoutes);
 app.use("/api/org/:orgId", checkDatabaseHealth);
+app.use("/api/org/:orgId", orgAuditLogger);
 app.use("/api/org/:orgId", orgRoutes);
 app.use("/api/org/:orgId/gradebook", checkDatabaseHealth);
 app.use("/api/org/:orgId/gradebook", gradebookRoutes);
@@ -6739,6 +6753,14 @@ app.get("/api/auth/verify", authenticateToken, async (req, res) => {
           orgRole: user.orgRole || null,
           organizationId: user.organizationId || null,
           classId: user.classId || null,
+          tenantSubdomain: user.organizationId
+            ? await require("./models/Organization")
+                .findById(user.organizationId)
+                .select("subdomain")
+                .lean()
+                .then((o) => o?.subdomain ?? null)
+                .catch(() => null)
+            : null,
         },
         isAdmin,
         isSuperAdmin,

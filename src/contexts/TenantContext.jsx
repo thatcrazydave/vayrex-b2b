@@ -62,11 +62,13 @@ export const TenantProvider = ({ children }) => {
 
   useEffect(() => {
     let cancelled = false;
+    const hostname = window.location.hostname;
 
-    API.get('/public/org-by-host')
+    API.get('/public/org-by-host', { params: { host: hostname } })
       .then(res => {
         if (cancelled) return;
         const org = res.data?.org ?? null;
+
         setTenant(org);
         setIsTenantHost(!!org);
         if (org) applyBranding(org.branding ?? {}, org.name);

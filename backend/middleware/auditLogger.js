@@ -1,35 +1,36 @@
-const AuditLog = require('../models/AuditLog');
-const Logger = require('../logger');
+const AuditLog = require("../models/AuditLog");
+const Logger = require("../logger");
 
 function auditLogger(action, targetType = null) {
   return async (req, res, next) => {
     const originalJson = res.json;
-    
-    res.json = function(data) {
+
+    res.json = function (data) {
       // Only log if operation was successful
       if (data.success !== false) {
         AuditLog.create({
           userId: req.user?.id,
           action,
+          orgId: req.orgId || null,
           targetType,
           targetId: req.params.id || data.data?.id || null,
           details: {
             endpoint: req.path,
             method: req.method,
             body: sanitizeBody(req.body),
-            response: sanitizeResponse(data)
+            response: sanitizeResponse(data),
           },
           ipAddress: req.ip,
-          userAgent: req.get('user-agent'),
-          severity: determineSeverity(action)
-        }).catch(err => {
-          Logger.error('Audit log creation error', { error: err.message });
+          userAgent: req.get("user-agent"),
+          severity: determineSeverity(action),
+        }).catch((err) => {
+          Logger.error("Audit log creation error", { error: err.message });
         });
       }
-      
+
       originalJson.call(this, data);
     };
-    
+
     next();
   };
 }
@@ -60,12 +61,26 @@ function deepSanitize(obj) {
 }
 
 function determineSeverity(action) {
-  const criticalActions = ['user_deleted', 'user_role_changed', 'backup_restored'];
-  const warningActions = ['user_status_changed', 'failed_login'];
-  
-  if (criticalActions.includes(action)) return 'critical';
-  if (warningActions.includes(action)) return 'warning';
-  return 'info';
+  const criticalActions = [
+    "user_deleted",
+    "user_role_changed",
+    "backup_restored",
+    "org_member_removed",
+    "seat_revoked",
+    "grade_amended",
+    "term_closed",
+    "promotion_wizard_completed",
+  ];
+  const warningActions = [
+    "user_status_changed",
+    "failed_login",
+    "org_updated",
+    "attendance_locked",
+  ];
+
+  if (criticalActions.includes(action)) return "critical";
+  if (warningActions.includes(action)) return "warning";
+  return "info";
 }
 
 module.exports = auditLogger;

@@ -18,6 +18,7 @@ function ClassManager() {
   const [students, setStudents] = useState([]);
   const [years, setYears] = useState([]);
   const [terms, setTerms] = useState([]);
+  const [selectedYearId, setSelectedYearId] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Forms
@@ -56,8 +57,11 @@ function ClassManager() {
       if (yRes.status === 'fulfilled') {
         const allYears = yRes.value.data.academicYears || [];
         setYears(allYears);
-        const activeYear = allYears.find(y => y.isActive);
-        if (activeYear) setTerms(activeYear.terms || []);
+        const activeYear = allYears.find(y => y.isActive) || allYears[0];
+        if (activeYear) {
+          setSelectedYearId(prev => prev || activeYear._id);
+          setTerms(activeYear.terms || []);
+        }
       }
     } catch { /* keep empty */ }
     setLoading(false);
@@ -75,6 +79,7 @@ function ClassManager() {
         name: classForm.name.trim(),
         level: classForm.level.trim() || undefined,
         capacity: classForm.capacity ? Number(classForm.capacity) : undefined,
+        academicYearId: selectedYearId || undefined,
       });
       showToast.success('Class created');
       setClassForm({ name: '', level: '', capacity: '' });
@@ -205,6 +210,25 @@ function ClassManager() {
                   <label style={labelStyle}>Capacity</label>
                   <input type="number" value={classForm.capacity} onChange={e => setClassForm({ ...classForm, capacity: e.target.value })} placeholder="e.g. 40" style={inputStyle} />
                 </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={labelStyle}>Academic Year *</label>
+                <select
+                  value={selectedYearId}
+                  onChange={e => setSelectedYearId(e.target.value)}
+                  style={inputStyle}
+                  required
+                >
+                  <option value="">Select academic year…</option>
+                  {years.map(y => (
+                    <option key={y._id} value={y._id}>
+                      {y.name}{y.isActive ? ' (Active)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {years.length === 0 && (
+                  <p style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>No academic years found. Create one under Academic Calendar first.</p>
+                )}
               </div>
               <div style={btnRow}>
                 <button type="submit" disabled={submitting} style={btnPrimary}>{submitting ? 'Creating…' : 'Create Class'}</button>

@@ -1,14 +1,13 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require("fs");
+const path = require("path");
 
-// Create logs directory if it doesn't exist
-const logsDir = path.join(__dirname, 'logs');
+const logsDir = path.join(__dirname, "logs");
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
-const errorLogPath = path.join(logsDir, 'error.log');
-const accessLogPath = path.join(logsDir, 'access.log');
+const errorLogPath = path.join(logsDir, "error.log");
+const accessLogPath = path.join(logsDir, "access.log");
 
 const getTimestamp = () => {
   return new Date().toISOString();
@@ -48,69 +47,53 @@ const formatLog = (level, message, data = null) => {
   return logEntry;
 };
 
+// ── Logger API ─────────────────────────────────────────────────────────────
 const Logger = {
   error: (message, data = null) => {
-    const logEntry = formatLog('ERROR', message, data);
-    
-    console.error(logEntry);
-    
-    try {
-      fs.appendFile(errorLogPath, logEntry + '\n', (err) => {
-        if (err) console.error('Failed to write to error log:', err.message);
-      });
-    } catch (err) {
-      console.error('Failed to write to error log:', err.message);
-    }
+    const entry = formatLog("ERROR", message, data);
+    console.error(entry);
+    // Errors write immediately — no buffering risk on critical path
+    fs.appendFile(errorLogPath, entry + "\n", (err) => {
+      if (err) console.error("Failed to write to error log:", err.message);
+    });
   },
 
   warn: (message, data = null) => {
-    const logEntry = formatLog('WARN', message, data);
-    console.warn(logEntry);
+    const entry = formatLog("WARN", message, data);
+    if (!isProd) console.warn(entry);
+    _errorBuf.push(entry);
+    if (_errorBuf.length >= FLUSH_THRESHOLD) _flushBuffer(_errorBuf, errorLogPath);
   },
 
   info: (message, data = null) => {
-    const logEntry = formatLog('INFO', message, data);
-    console.log(logEntry);
+    const entry = formatLog("INFO", message, data);
+    if (!isProd) console.log(entry);
+    _errorBuf.push(entry);
+    if (_errorBuf.length >= FLUSH_THRESHOLD) _flushBuffer(_errorBuf, errorLogPath);
   },
 
   debug: (message, data = null) => {
-    if (process.env.NODE_ENV !== 'production') {
-      const logEntry = formatLog('DEBUG', message, data);
-      console.log(logEntry);
-    }
+    if (isProd) return;
+    const entry = formatLog("DEBUG", message, data);
+    console.log(entry);
+    // Debug logs are dev-only and never written to disk
   },
 
-  access: (method, path, statusCode, duration = 0) => {
-    const logEntry = formatLog('ACCESS', `${method} ${path} ${statusCode} (${duration}ms)`);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(logEntry);
-    }
-    
-    try {
-      fs.appendFile(accessLogPath, logEntry + '\n', (err) => {
-        if (err) console.error('Failed to write to access log:', err.message);
-      });
-    } catch (err) {
-      console.error('Failed to write to access log:', err.message);
-    }
+  access: (method, urlPath, statusCode, duration = 0) => {
+    const entry = formatLog("ACCESS", `${method} ${urlPath} ${statusCode} (${duration}ms)`);
+    if (!isProd) console.log(entry);
+    _accessBuf.push(entry);
+    if (_accessBuf.length >= FLUSH_THRESHOLD) _flushBuffer(_accessBuf, accessLogPath);
   },
 
   apiError: (endpoint, statusCode, errorCode, message, details = null) => {
-    const data = {
-      endpoint,
-      statusCode,
-      errorCode,
-      message,
-      ...(details && { details })
-    };
+    const data = { endpoint, statusCode, errorCode, message, ...(details && { details }) };
     Logger.error(`API Error: ${endpoint}`, data);
   },
 
   request: (method, url, clientIP) => {
-    const data = { method, url, clientIP };
-    Logger.debug('Incoming request', data);
-  }
+    Logger.debug("Incoming request", { method, url, clientIP });
+  },
 };
 
 module.exports = Logger;
