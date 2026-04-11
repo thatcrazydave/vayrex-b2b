@@ -114,26 +114,45 @@ const TokenService = {
    * @param {string} jti - Unique token identifier
    */
   isTokenRevoked: async (jti) => {
-    try {
-      if (!isRedisReady()) {
-        Logger.debug('Redis not ready, assuming token not revoked (fail-open)', { jti });
-        return false; // If Redis unavailable, allow token (fail-open)
-      }
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY_MS = 100;
 
-      const client = getRedisClient();
-      if (!client) {
-        Logger.debug('Redis client unavailable, assuming token not revoked (fail-open)', { jti });
-        return false;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (!isRedisReady()) {
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            continue;
+          }
+          Logger.error('Redis not ready after retries, rejecting token (fail-closed)', { jti });
+          return true;
+        }
+
+        const client = getRedisClient();
+        if (!client) {
+          if (attempt < MAX_RETRIES) {
+            await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            continue;
+          }
+          Logger.error('Redis client unavailable after retries, rejecting token (fail-closed)', { jti });
+          return true;
+        }
+
+        const redisKey = `token:blacklist:jti:${jti}`;
+        const exists = await client.exists(redisKey);
+
+        return exists === 1;
+      } catch (err) {
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        Logger.error('Token revocation check error after retries, rejecting token (fail-closed)', { error: err.message, jti });
+        return true;
       }
-      
-      const redisKey = `token:blacklist:jti:${jti}`;
-      const exists = await client.exists(redisKey);
-      
-      return exists === 1;
-    } catch (err) {
-      Logger.error('Token revocation check error', { error: err.message, jti });
-      return false; // Fail-open on error
     }
+
+    return true; // Fail-closed fallback
   },
 
   /**

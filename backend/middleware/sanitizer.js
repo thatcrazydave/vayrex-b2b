@@ -304,11 +304,10 @@ const sanitizeRequestBody = (allowHtmlFields = []) => {
     }
 
     try {
-      // Log original for debugging (remove in production)
       if (process.env.NODE_ENV !== 'production') {
         Logger.debug('Sanitizing request body', {
           path: req.path,
-          originalBody: JSON.stringify(req.body)
+          fields: Object.keys(req.body || {}),
         });
       }
 
@@ -334,7 +333,7 @@ const sanitizeRequestBody = (allowHtmlFields = []) => {
       Logger.error('Request body sanitization failed', {
         path: req.path,
         error: err.message,
-        body: JSON.stringify(req.body)
+        fields: Object.keys(req.body || {}),
       });
 
       return res.status(400).json({

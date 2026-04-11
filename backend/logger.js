@@ -14,14 +14,37 @@ const getTimestamp = () => {
   return new Date().toISOString();
 };
 
+const REDACTED_KEYS = new Set([
+  'password', 'confirmPassword', 'currentPassword', 'newPassword',
+  'token', 'inviteToken', 'resetToken', 'accessToken', 'refreshToken',
+  'originalBody',
+  'resetCode', 'verificationCode', 'verificationToken',
+]);
+
+function redactSensitive(obj) {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(redactSensitive);
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (REDACTED_KEYS.has(key)) {
+      result[key] = '[REDACTED]';
+    } else if (typeof value === 'object' && value !== null) {
+      result[key] = redactSensitive(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 const formatLog = (level, message, data = null) => {
   const timestamp = getTimestamp();
   let logEntry = `[${timestamp}] [${level}] ${message}`;
-  
+
   if (data) {
-    logEntry += ` | ${JSON.stringify(data)}`;
+    logEntry += ` | ${JSON.stringify(redactSensitive(data))}`;
   }
-  
+
   return logEntry;
 };
 

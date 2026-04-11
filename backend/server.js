@@ -434,10 +434,12 @@ function ensureObjectId(userId) {
 }
 
 // ===== CORS =====
-const ALLOWED_ORIGINS = (
-  process.env.CORS_ORIGINS ||
-  "http://localhost:5173,http://localhost:5174,https://vayrex.netlify.app"
-)
+const DEFAULT_CORS_ORIGINS =
+  process.env.NODE_ENV === "production"
+    ? "https://madebyovo.me"
+    : "http://localhost:5173,http://localhost:5174,https://vayrex.netlify.app";
+
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS)
   .split(",")
   .map((s) => s.trim());
 Logger.info("CORS Configuration", {

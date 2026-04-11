@@ -138,7 +138,7 @@ function validateInput(schema) {
       Logger.warn("Input validation failed", {
         path: req.path,
         errors,
-        body: JSON.stringify(req.body),
+        fields: Object.keys(req.body || {}),
       });
 
       return res.status(400).json({
