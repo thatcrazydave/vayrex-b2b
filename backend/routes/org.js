@@ -1144,24 +1144,64 @@ router.post("/subjects/assign", requireITAdmin, async (req, res) => {
     if (!classroom) return sendError(res, 404, "Classroom not found", "CLASSROOM_NOT_FOUND");
     if (!term) return sendError(res, 404, "Term not found", "TERM_NOT_FOUND");
 
-    const assignment = await SubjectAssignment.findOneAndUpdate(
-      { orgId: req.orgId, teacherId, subjectId, classId, termId },
-      {
-        $set: { isActive: true },
-        $setOnInsert: { orgId: req.orgId, teacherId, subjectId, classId, termId },
-      },
-      { upsert: true, new: true },
-    );
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    Logger.info("Subject assignment created", {
-      assignmentId: assignment._id,
-      teacherId,
-      subjectId,
-      classId,
-      termId,
-    });
+    try {
+      // Find any existing active assignment for this slot (subject, class, term)
+      const existing = await SubjectAssignment.findOne({
+        orgId: req.orgId,
+        subjectId,
+        classId,
+        termId,
+        isActive: true,
+      }).session(session);
 
-    return sendSuccess(res, { assignment }, 201);
+      if (existing) {
+        if (existing.teacherId.toString() === teacherId.toString()) {
+          // Same teacher already assigned, just return it
+          await session.commitTransaction();
+          return sendSuccess(res, { assignment: existing });
+        }
+
+        // Different teacher: deactivate the old one
+        existing.isActive = false;
+        await existing.save({ session });
+      }
+
+      // Create the new assignment
+      const assignment = await SubjectAssignment.create(
+        [
+          {
+            orgId: req.orgId,
+            teacherId,
+            subjectId,
+            classId,
+            termId,
+            isActive: true,
+          },
+        ],
+        { session },
+      );
+
+      await session.commitTransaction();
+
+      Logger.info("Subject assignment created (with handoff)", {
+        assignmentId: assignment[0]._id,
+        teacherId,
+        subjectId,
+        classId,
+        termId,
+        replacedId: existing ? existing._id : null,
+      });
+
+      return sendSuccess(res, { assignment: assignment[0] }, 201);
+    } catch (err) {
+      await session.abortTransaction();
+      throw err;
+    } finally {
+      session.endSession();
+    }
   } catch (err) {
     Logger.error("POST /subjects/assign error", { error: err.message });
     return sendError(res, 500, "Failed to assign teacher", "INTERNAL_ERROR");

@@ -99,4 +99,4 @@ function orgAuditLogger(req, res, next) {
   next();
 }
 
-module.exports = orgAuditLogger;
+module.exports = { orgAuditLogger };

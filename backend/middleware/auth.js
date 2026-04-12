@@ -316,7 +316,10 @@ const authenticateToken = async (req, res, next) => {
     req.fingerprint = generateRequestFingerprint(req);
 
     // Attach validated data to request
+    // getCachedUser returns a plain object (lean/JSON.parse), so .id doesn't exist as a virtual.
+    // Normalise here so downstream code can use req.user.id reliably.
     req.user = user;
+    if (!req.user.id) req.user.id = req.user._id.toString();
     req.token = token;
     req.tokenDecoded = decoded;
     req.authTime = Date.now() - startTime;

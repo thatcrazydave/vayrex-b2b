@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node cluster.js",
-    "start:single": "node server.js",
+    "start": "node server.js",
+    "start:multiple": "node cluster.js",
     "dev": "nodemon server.js"
   },
   "keywords": [],

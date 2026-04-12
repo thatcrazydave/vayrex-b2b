@@ -1,6 +1,20 @@
 const fs = require("fs");
 const path = require("path");
 
+const isProd = process.env.NODE_ENV === "production";
+const FLUSH_THRESHOLD = 50;
+const _errorBuf = [];
+const _accessBuf = [];
+
+const _flushBuffer = (buf, filePath) => {
+  if (buf.length === 0) return;
+  const content = buf.join("\n") + "\n";
+  buf.length = 0;
+  fs.appendFile(filePath, content, (err) => {
+    if (err) console.error(`Failed to flush log buffer to ${filePath}:`, err.message);
+  });
+};
+
 const logsDir = path.join(__dirname, "logs");
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
